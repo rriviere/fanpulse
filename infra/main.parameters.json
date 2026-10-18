@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "${AZURE_LOCATION}"
+    },
+    "environmentName": {
+      "value": "${AZURE_ENV_NAME}"
+    },
+    "foundryProjectName": {
+      "value": "fanpulse-dev"
+    },
+    "developerPrincipalId": {
+      "value": "${AZURE_PRINCIPAL_ID=}"
+    },
+    "matchAnalystPrincipalId": {
+      "value": "${FOUNDRY_MATCH_ANALYST_PRINCIPAL_ID=}"
+    },
+    "fanEngagementPrincipalId": {
+      "value": "${FOUNDRY_FAN_ENGAGEMENT_PRINCIPAL_ID=}"
+    }
+  }
+}

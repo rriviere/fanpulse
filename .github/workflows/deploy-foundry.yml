@@ -1,0 +1,97 @@
+name: Deploy Foundry solution
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ai/agents/definitions/**'
+      - 'ai/agents/schemas/**'
+      - 'ai/agents/loader.py'
+      - 'ai/agents/provision.py'
+      - 'ai/models/deployments/**'
+      - 'ai/models/loader.py'
+      - 'ai/provision.py'
+      - 'ai/tests/test_configuration.py'
+      - '.github/workflows/deploy-foundry.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fanpulse-foundry-development
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.12'
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.cache/python
+
+jobs:
+  validate:
+    name: Validate declarative solution
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install Foundry deployment dependencies
+        run: python -m pip install -r apps/api/requirements.txt
+
+      - name: Validate model profiles, agents, and schemas
+        run: |
+          python -m ai.provision
+          python -m pytest ai/tests/test_configuration.py -q
+
+  publish:
+    name: Approve and publish agents
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: development
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
+      FOUNDRY_VISION_MODEL_DEPLOYMENT: ${{ vars.FOUNDRY_VISION_MODEL_DEPLOYMENT }}
+    steps:
+      - name: Check out validated commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install Foundry deployment dependencies
+        run: python -m pip install -r apps/api/requirements.txt
+
+      - name: Authenticate to Azure with OIDC
+        uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify deployment configuration
+        run: |
+          test -n "$FOUNDRY_PROJECT_ENDPOINT"
+          test -n "$FOUNDRY_VISION_MODEL_DEPLOYMENT"
+          case "$FOUNDRY_PROJECT_ENDPOINT" in
+            https://*.services.ai.azure.com/api/projects/*) ;;
+            *) echo "FOUNDRY_PROJECT_ENDPOINT is not a Foundry project endpoint" >&2; exit 1 ;;
+          esac
+
+      - name: Publish changed agent versions
+        run: python -m ai.provision --apply

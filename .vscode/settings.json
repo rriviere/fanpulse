@@ -1,0 +1,9 @@
+{
+    "python.terminal.useEnvFile": true,
+    "terminal.integrated.env.osx": {
+        "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.cache/python"
+    },
+    "terminal.integrated.env.linux": {
+        "PYTHONPYCACHEPREFIX": "${workspaceFolder}/.cache/python"
+    }
+}

@@ -1,0 +1,188 @@
+name: Deploy web application
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'ai/agents/*.py'
+      - 'ai/models/*.py'
+      - 'ai/vision/**'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-application.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fanpulse-development-deployment
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.12'
+  NODE_VERSION: '20'
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.cache/python
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            apps/api/requirements.txt
+            apps/api/requirements-dev.txt
+
+      - name: Install and test Python application
+        run: |
+          python -m pip install -r apps/api/requirements-dev.txt
+          python -m pytest apps/api/tests ai/tests -q
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Lint and build web application
+        working-directory: apps/web
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Assemble tested application
+        run: |
+          mkdir -p package/apps/api package/apps/web package/ai
+          cp requirements.txt package/
+          cp apps/api/requirements.txt package/apps/api/
+          rsync -a --exclude '__pycache__' --exclude '*.pyc' apps/api/app package/apps/api/
+          cp apps/api/__init__.py package/apps/api/
+          cp apps/__init__.py package/apps/
+          rsync -a --exclude '__pycache__' --exclude '*.pyc' ai/agents ai/models ai/vision package/ai/
+          cp ai/__init__.py package/ai/
+          cp -R apps/web/dist package/apps/web/
+          mkdir -p package/apps/web/dist/media
+
+      - name: Upload tested application artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fanpulse-tested-${{ github.sha }}
+          path: package
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    name: Approve and deploy
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: development
+      url: ${{ steps.endpoint.outputs.url }}
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AZURE_CORE_OUTPUT: none
+    steps:
+      - name: Download tested application artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: fanpulse-tested-${{ github.sha }}
+          path: package
+
+      - name: Authenticate to Azure with OIDC
+        uses: azure/login@935127ca5bb3c4b02c9c2c10060028383878f33f # v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify deployment target
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+        run: |
+          az webapp show --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME" --query id --output tsv >/dev/null
+
+      - name: Add licensed match video from private Blob Storage
+        env:
+          STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT_NAME }}
+          VIDEO_CONTAINER: ${{ vars.FOOTBALL_VIDEOS_CONTAINER }}
+          VIDEO_BLOB_NAME: ${{ vars.FOOTBALL_VIDEO_BLOB_NAME }}
+        run: |
+          test -n "$STORAGE_ACCOUNT"
+          test -n "$VIDEO_CONTAINER"
+          test -n "$VIDEO_BLOB_NAME"
+          az storage blob download \
+            --auth-mode login \
+            --account-name "$STORAGE_ACCOUNT" \
+            --container-name "$VIDEO_CONTAINER" \
+            --name "$VIDEO_BLOB_NAME" \
+            --file package/apps/web/dist/media/match.mov \
+            --overwrite true \
+            --only-show-errors
+          test -s package/apps/web/dist/media/match.mov
+
+      - name: Create immutable deployment package
+        run: |
+          cd package
+          zip -q -r ../fanpulse-${{ github.sha }}.zip .
+
+      - name: Retain final deployment package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fanpulse-deployment-${{ github.sha }}
+          path: fanpulse-${{ github.sha }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Start App Service for deployment
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+        run: az webapp start --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
+
+      - name: Deploy package to App Service
+        uses: azure/webapps-deploy@b686016b4de8820a23519503685d8d03fbfa03a6 # v3
+        with:
+          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
+          package: fanpulse-${{ github.sha }}.zip
+
+      - name: Resolve application endpoint
+        id: endpoint
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+        run: |
+          host=$(az webapp show --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME" --query defaultHostName --output tsv)
+          echo "url=https://$host" >> "$GITHUB_OUTPUT"
+
+      - name: Verify deployed application without AI inference
+        env:
+          APP_URL: ${{ steps.endpoint.outputs.url }}
+        run: |
+          for attempt in {1..20}; do
+            if curl --fail --silent --show-error --max-time 20 "$APP_URL/api/health"; then
+              break
+            fi
+            if [[ "$attempt" == 20 ]]; then
+              echo "Application did not become healthy" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+          curl --fail --silent --show-error --max-time 20 "$APP_URL/" >/dev/null
+          curl --fail --silent --show-error --max-time 20 \
+            --range 0-1023 "$APP_URL/media/match.mov" >/dev/null

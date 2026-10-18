@@ -1,0 +1,17 @@
+name: fanpulse
+resourceGroup: rg-fanpulse-dev
+
+infra:
+  provider: bicep
+  path: ./infra
+  module: main
+
+services:
+  web:
+    project: .
+    host: appservice
+    language: py
+    hooks:
+      prepackage:
+        shell: sh
+        run: cd apps/web && npm ci && npm run build

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.pytest_cache/
+.venv/
+.cache/
+__pycache__/
+*.pyc
+*.db
+.env
+.azure/
+apps/web/public/media/*
+!apps/web/public/media/README.md
+

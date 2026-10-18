@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["publish_insight", "significance", "headline", "explanation", "uncertainty_note", "poll"],
+  "properties": {
+    "publish_insight": {"type": "boolean"},
+    "significance": {"type": "integer", "minimum": 0, "maximum": 100},
+    "headline": {"type": "string", "minLength": 1, "maxLength": 120},
+    "explanation": {"type": "string", "minLength": 1, "maxLength": 320},
+    "uncertainty_note": {
+      "anyOf": [{"type": "string", "maxLength": 200}, {"type": "null"}]
+    },
+    "poll": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["question", "options", "duplicate_key"],
+          "properties": {
+            "question": {"type": "string", "minLength": 1, "maxLength": 180},
+            "options": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 4,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "label"],
+                "properties": {
+                  "id": {"type": "string", "pattern": "^[a-z0-9-]{1,32}$"},
+                  "label": {"type": "string", "minLength": 1, "maxLength": 100}
+                }
+              }
+            },
+            "duplicate_key": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 100,
+              "pattern": "^[a-z0-9-]+$",
+              "not": {"enum": ["duplicate-key", "poll-key", "placeholder"]}
+            }
+          }
+        },
+        {"type": "null"}
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"poll": {"type": "object"}}, "required": ["poll"]},
+      "then": {
+        "properties": {
+          "publish_insight": {"const": true},
+          "significance": {"minimum": 70}
+        }
+      }
+    }
+  ]
+}

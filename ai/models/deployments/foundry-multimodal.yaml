@@ -1,0 +1,22 @@
+id: foundry-multimodal
+provider: azure-foundry
+purpose: Multimodal football-frame analysis and agent reasoning
+deployment:
+  name: gpt-5-mini
+  environment_variable: FOUNDRY_VISION_MODEL_DEPLOYMENT
+  model:
+    name: gpt-5-mini
+    version: 2025-08-07
+    format: OpenAI
+  sku:
+    name: GlobalStandard
+    capacity: 10
+  region: australiaeast
+capabilities:
+  - text
+  - image
+authentication: entra-id
+defaults:
+  reasoning_effort: minimal
+  image_detail: low
+  max_output_tokens: 700
