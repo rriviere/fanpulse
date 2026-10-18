@@ -7,8 +7,8 @@ param appServicePlanName string
 @description('Globally unique name of the FanPulse web app.')
 param webAppName string
 
-@description('App Service SKU. F1 is the default no-cost development tier.')
-param appServiceSkuName string = 'F1'
+@description('App Service SKU. B1 is the default tier for reliable hackathon demonstrations.')
+param appServiceSkuName string = 'B1'
 
 @description('Foundry account name used for managed-identity role assignment.')
 param foundryAccountName string

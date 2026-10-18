@@ -30,12 +30,12 @@ param matchAnalystAgentName string = 'fanpulse-match-analyst'
 @description('Persisted Foundry Fan Engagement agent used by the hosted backend.')
 param fanEngagementAgentName string = 'fanpulse-fan-engagement'
 
-@description('App Service SKU for the development deployment. F1 has no hosting charge.')
+@description('App Service SKU for the development deployment. B1 avoids the daily CPU quota imposed by F1.')
 @allowed([
   'F1'
   'B1'
 ])
-param appServiceSkuName string = 'F1'
+param appServiceSkuName string = 'B1'
 
 var nameSuffix = uniqueString(subscription().id, resourceGroup().id, environmentName)
 var storageAccountName = 'fanpulse${take(nameSuffix, 18)}'
