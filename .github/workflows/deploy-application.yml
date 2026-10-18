@@ -147,10 +147,19 @@ jobs:
         run: az webapp start --resource-group "$RESOURCE_GROUP" --name "$WEBAPP_NAME"
 
       - name: Deploy package to App Service
-        uses: azure/webapps-deploy@b686016b4de8820a23519503685d8d03fbfa03a6 # v3
-        with:
-          app-name: ${{ vars.AZURE_WEBAPP_NAME }}
-          package: fanpulse-${{ github.sha }}.zip
+        env:
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          WEBAPP_NAME: ${{ vars.AZURE_WEBAPP_NAME }}
+        run: |
+          az webapp deploy \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$WEBAPP_NAME" \
+            --src-path "fanpulse-${{ github.sha }}.zip" \
+            --type zip \
+            --clean true \
+            --restart true \
+            --track-status true \
+            --only-show-errors
 
       - name: Resolve application endpoint
         id: endpoint
