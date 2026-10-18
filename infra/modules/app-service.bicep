@@ -74,7 +74,7 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
     clientAffinityEnabled: false
     siteConfig: {
       linuxFxVersion: 'PYTHON|3.12'
-      appCommandLine: 'python -m gunicorn apps.api.app.main:app --bind 0.0.0.0:8000 --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -'
+      appCommandLine: 'PYTHONPATH=/home/site/wwwroot/.python_packages/lib/site-packages python -m gunicorn apps.api.app.main:app --bind 0.0.0.0:8000 --workers 1 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --access-logfile - --error-logfile -'
       alwaysOn: false
       ftpsState: 'Disabled'
       minTlsVersion: '1.2'
