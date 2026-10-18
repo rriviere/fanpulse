@@ -2,15 +2,6 @@ name: Deploy web application
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'apps/**'
-      - 'ai/agents/*.py'
-      - 'ai/models/*.py'
-      - 'ai/vision/**'
-      - 'requirements.txt'
-      - '.github/workflows/deploy-application.yml'
 
 permissions:
   contents: read
@@ -85,6 +76,7 @@ jobs:
   deploy:
     name: Approve and deploy
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:

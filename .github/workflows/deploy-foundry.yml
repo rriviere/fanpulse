@@ -2,18 +2,6 @@ name: Deploy Foundry solution
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'ai/agents/definitions/**'
-      - 'ai/agents/schemas/**'
-      - 'ai/agents/loader.py'
-      - 'ai/agents/provision.py'
-      - 'ai/models/deployments/**'
-      - 'ai/models/loader.py'
-      - 'ai/provision.py'
-      - 'ai/tests/test_configuration.py'
-      - '.github/workflows/deploy-foundry.yml'
 
 permissions:
   contents: read
@@ -53,6 +41,7 @@ jobs:
   publish:
     name: Approve and publish agents
     needs: validate
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:

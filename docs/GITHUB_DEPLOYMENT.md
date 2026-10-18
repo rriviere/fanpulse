@@ -79,7 +79,15 @@ The web deployment downloads this blob into the immutable application ZIP and fa
 
 ## Releases and rollback
 
-Merging application/runtime changes to `main` starts **Deploy web application**. Merging agent definitions, schemas, or model profiles starts **Deploy Foundry solution**. Both pause for the `development` environment approval and also support manual dispatch.
+Both deployment workflows are manual-only. Open GitHub Actions, select the
+workflow, choose **Run workflow**, and retain the `main` branch. A hard workflow
+condition prevents deployment from any other branch. CI continues to run on
+pull requests and pushes to `main`.
+
+The current GitHub plan does not support required-reviewer or wait-timer rules
+for environments in this private repository. The `development` environment still
+scopes its OIDC identity, secrets, and variables, but deployment begins as soon
+as you manually run the workflow.
 
 When a model profile changes, run and review `azd provision` first so the Bicep-managed deployment exists, then approve the waiting Foundry workflow. Agent publication cannot create or resize model infrastructure.
 
