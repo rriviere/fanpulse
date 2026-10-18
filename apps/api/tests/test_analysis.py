@@ -232,6 +232,12 @@ class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
             2,
         )
         analyst.gate.set()
+        await asyncio.sleep(0.02)
+        enriched = [
+            message for message in messages
+            if message.get("type") == "vision_result" and message["provider"]["agent"] == "mock-agent"
+        ]
+        self.assertEqual([message["window"]["end_seconds"] for message in enriched], [24])
         await manager.close()
 
 

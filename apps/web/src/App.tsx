@@ -23,6 +23,7 @@ function App(){
   const applyVisionResult=useCallback((message:VisionResultMessage)=>{
     setLatestResult(message);setAnalysisLatency(message.latency.total_ms);setAnalysisStatus(message.policy.outcome==='published'?'published':'routine')
     const id=`vision-${message.generation}-${message.window.end_seconds}`
+    if(message.provider.agent==='vision-direct'){setPoll(null);setVoted(null);setCounts({})}
     if(!message.insight.publish_insight){
       if(message.provider.agent!=='vision-direct')setTimeline(previous=>previous.filter(item=>item.id!==id))
       return
@@ -129,7 +130,10 @@ function App(){
       </section>
       <aside>
         <div className="panel-heading"><div><span className="eyebrow"><Bot/> FOUNDRY AGENT TEAM</span><h2>Live intelligence</h2><small className="analysis-meta">{analysisStatus}{analysisLatency!==null?` · ${(analysisLatency/1000).toFixed(1)}s`:''}</small></div><span className={connected?'status connected':'status'}>{connected?'Connected':'Disconnected'}</span></div>
-        <AnimatePresence mode="wait">{poll?<PollCard key={poll.id+mode} poll={poll} counts={counts} total={total} voted={voted} vote={vote}/>:latestResult?<ObservationCard key={`${latestResult.generation}-${latestResult.window.end_seconds}`} result={latestResult}/>:<EmptyState/>}</AnimatePresence>
+        <div className="intelligence-stack">
+          <AnimatePresence mode="wait">{latestResult?<ObservationCard key={`${latestResult.generation}-${latestResult.window.end_seconds}`} result={latestResult}/>:<EmptyState/>}</AnimatePresence>
+          <AnimatePresence>{poll&&<PollCard key={poll.id+mode} poll={poll} counts={counts} total={total} voted={voted} vote={vote}/>}</AnimatePresence>
+        </div>
         <AgentTrace poll={poll} result={latestResult}/>
       </aside>
     </div>
@@ -138,7 +142,7 @@ function App(){
 }
 
 function PollCard({poll,counts,total,voted,vote}:{poll:Poll;counts:Counts;total:number;voted:string|null;vote:(id:string)=>void}){
-  return <motion.div className="poll-card" initial={{opacity:0,x:24}} animate={{opacity:1,x:0}}><div className="signal"><Activity/><span>SIGNIFICANT MOMENT</span><b>{poll.significance}</b></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
+  return <motion.div className="poll-card" initial={{opacity:0,y:18}} animate={{opacity:1,y:0}} exit={{opacity:0,y:10}}><div className="signal"><Users/><span>FAN ENGAGEMENT</span><b>{poll.significance}</b></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
 }
 function EmptyState(){return <motion.div className="empty" initial={{opacity:0}} animate={{opacity:1}}><div><Gauge/><i/></div><h3>Watching the match</h3><p>Foundry vision, Match Analyst, and Fan Engagement are looking for grounded, meaningful moments. Routine play is shown with its reason instead of becoming a poll.</p></motion.div>}
 function ObservationCard({result}:{result:VisionResultMessage}){const published=result.policy.outcome==='published';return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className={published?'observation-state published':'observation-state'}><Activity/><span>{published?'INSIGHT PUBLISHED':'ROUTINE MOMENT'}</span><b>{result.insight.significance}</b></div><h3>{result.assessment?.summary||result.observation.description}</h3><p>{result.assessment?.rationale||result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>{result.policy.reason.replaceAll('_',' ')}</dd></div></dl>{result.assessment?.uncertainty_note&&<small>{result.assessment.uncertainty_note}</small>}</motion.div>}
