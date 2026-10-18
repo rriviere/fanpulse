@@ -7,6 +7,7 @@ from time import monotonic
 from typing import Any, Awaitable, Callable, Protocol
 
 from ai.agents.contracts import AgentInference, MatchAnalystDecision
+from ai.foundry_errors import FoundryRateLimitError
 from ai.vision.models import FootballObservation
 from ai.vision.provider import VisionInference
 from apps.api.app.analysis.models import AnalysisWindow, PlaybackState, SubmissionResult
@@ -175,6 +176,8 @@ class AnalysisManager:
                             agent_result.decision.publish_insight,
                             agent_result.decision.poll is not None,
                         )
+                    except FoundryRateLimitError:
+                        raise
                     except Exception as exc:
                         logger.exception(
                             "fanpulse agent_error session=%s generation=%d error=%s fallback=deterministic",
@@ -267,6 +270,21 @@ class AnalysisManager:
                     )
                 except asyncio.CancelledError:
                     raise
+                except FoundryRateLimitError as exc:
+                    logger.warning(
+                        "fanpulse analysis_skipped session=%s generation=%d timestamp=%.3f stage=%s reason=rate_limited",
+                        session_id,
+                        generation,
+                        window.frames[-1].timestamp_seconds,
+                        exc.stage,
+                    )
+                    await self.broadcast({
+                        "type": "analysis_status",
+                        "session_id": session_id,
+                        "generation": generation,
+                        "status": "rate_limited",
+                        "message": "Foundry is busy; this window was skipped and analysis will continue.",
+                    })
                 except Exception as exc:
                     logger.exception(
                         "fanpulse analysis_error session=%s generation=%d timestamp=%.3f total_ms=%d error=%s",

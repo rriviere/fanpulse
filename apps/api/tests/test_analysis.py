@@ -3,6 +3,7 @@ import base64
 import unittest
 
 from ai.agents.contracts import AgentInference, AgentPoll, AgentPollOption, MatchAnalystDecision, MatchAssessment
+from ai.foundry_errors import FoundryRateLimitError
 from ai.vision.models import FootballObservation, VisionBatchResult
 from ai.vision.provider import VisionInference
 from apps.api.app.analysis.manager import AnalysisManager, SessionState
@@ -42,6 +43,21 @@ class MockVision:
         self.calls.append(frames[-1].timestamp_seconds)
         if self.gate:
             await self.gate.wait()
+        item = observation(frames[-1].timestamp_seconds)
+        return VisionInference(
+            result=VisionBatchResult(observations=[item]),
+            latency_ms=10,
+            input_tokens=1,
+            output_tokens=1,
+            model_deployment="mock-vision",
+        )
+
+
+class RateLimitedOnceVision(MockVision):
+    async def analyze(self, frames):
+        self.calls.append(frames[-1].timestamp_seconds)
+        if len(self.calls) == 1:
+            raise FoundryRateLimitError("vision")
         item = observation(frames[-1].timestamp_seconds)
         return VisionInference(
             result=VisionBatchResult(observations=[item]),
@@ -104,6 +120,24 @@ class MockRoutineAnalyst:
 
 
 class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rate_limited_window_is_skipped_and_next_window_continues(self):
+        messages = []
+
+        async def broadcast(message):
+            messages.append(message)
+
+        manager = AnalysisManager(RateLimitedOnceVision(), MockAnalyst(), broadcast)
+        await manager.update_state("s1", PlaybackState(generation=0, playing=True, position_seconds=4))
+        await manager.submit("s1", window(0, 0))
+        await asyncio.sleep(0.02)
+        self.assertTrue(any(message.get("status") == "rate_limited" for message in messages))
+
+        await manager.update_state("s1", PlaybackState(generation=0, playing=True, position_seconds=24))
+        await manager.submit("s1", window(0, 20))
+        await asyncio.sleep(0.02)
+        self.assertTrue(any(message["type"] == "vision_result" for message in messages))
+        await manager.close()
+
     async def test_paused_session_rejects_window(self):
         messages = []
         manager = AnalysisManager(MockVision(), MockAnalyst(), messages.append)

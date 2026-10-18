@@ -10,6 +10,7 @@ from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
 from openai import APIConnectionError, APIStatusError, APITimeoutError
 
+from ai.foundry_errors import FoundryRateLimitError
 from ai.vision.models import FootballObservation
 
 from .contracts import AgentInference, FanEngagementDecision, MatchAssessment
@@ -82,6 +83,8 @@ class FoundryAgentPipeline:
                 result = await asyncio.wait_for(asyncio.to_thread(operation), timeout=self.timeout_seconds)
                 return result, round((perf_counter() - started) * 1000), attempt == 1
             except Exception as exc:
+                if isinstance(exc, APIStatusError) and exc.status_code == 429:
+                    raise FoundryRateLimitError(stage) from exc
                 if attempt == 1 or not self._is_transient(exc):
                     raise
                 logger.warning("fanpulse agent_retry stage=%s attempt=1 error=%s", stage, str(exc)[:200])
@@ -92,7 +95,7 @@ class FoundryAgentPipeline:
     def _is_transient(exc: Exception) -> bool:
         if isinstance(exc, (APIConnectionError, APITimeoutError, TimeoutError, asyncio.TimeoutError)):
             return True
-        return isinstance(exc, APIStatusError) and (exc.status_code == 429 or exc.status_code >= 500)
+        return isinstance(exc, APIStatusError) and exc.status_code >= 500
 
     def _assess_sync(self, observation: FootballObservation) -> MatchAssessment:
         response = self._match_client.responses.create(

@@ -6,7 +6,9 @@ from time import perf_counter
 
 from azure.ai.projects import AIProjectClient
 from azure.identity import DefaultAzureCredential
+from openai import APIStatusError
 
+from ai.foundry_errors import FoundryRateLimitError
 from ai.models.loader import get_model_profile
 
 from .extractor import ExtractedFrame
@@ -40,15 +42,20 @@ class FoundryVisionProvider:
         self.max_output_tokens = profile.defaults["max_output_tokens"]
         self._credential = DefaultAzureCredential()
         self._project = AIProjectClient(endpoint=project_endpoint, credential=self._credential)
-        self._openai = self._project.get_openai_client()
+        self._openai = self._project.get_openai_client().with_options(max_retries=0)
 
     async def analyze(self, frames: list[ExtractedFrame]) -> VisionInference:
         if not frames:
             raise ValueError("At least one frame is required")
-        return await asyncio.wait_for(
-            asyncio.to_thread(self._analyze_sync, frames),
-            timeout=self.timeout_seconds,
-        )
+        try:
+            return await asyncio.wait_for(
+                asyncio.to_thread(self._analyze_sync, frames),
+                timeout=self.timeout_seconds,
+            )
+        except APIStatusError as exc:
+            if exc.status_code == 429:
+                raise FoundryRateLimitError("vision") from exc
+            raise
 
     def _analyze_sync(self, frames: list[ExtractedFrame]) -> VisionInference:
         content: list[dict] = [{
