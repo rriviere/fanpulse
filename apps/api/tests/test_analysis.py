@@ -182,6 +182,13 @@ class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(first.poll)
         self.assertIsNone(second.poll)
 
+    async def test_policy_requires_demo_significance_threshold_for_poll(self):
+        state = SessionState()
+        item = observation(20)
+        decision = (await MockAnalyst().analyze(item)).decision.model_copy(update={"significance": 59})
+        result = AnalysisManager._apply_policy(state, item, decision)
+        self.assertIsNone(result.poll)
+
     async def test_suppressed_observation_is_still_delivered_with_reason(self):
         messages = []
 
@@ -220,10 +227,10 @@ class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(direct), 1)
         self.assertEqual(analyst.calls, 1)
 
-        await manager.update_state("s1", PlaybackState(generation=0, playing=True, position_seconds=24))
-        await manager.submit("s1", window(0, 20))
+        await manager.update_state("s1", PlaybackState(generation=0, playing=True, position_seconds=14))
+        await manager.submit("s1", window(0, 10))
         await asyncio.sleep(0.01)
-        self.assertEqual(vision.calls, [4, 24])
+        self.assertEqual(vision.calls, [4, 14])
         self.assertEqual(
             len([
                 message for message in messages
@@ -237,7 +244,7 @@ class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
             message for message in messages
             if message.get("type") == "vision_result" and message["provider"]["agent"] == "mock-agent"
         ]
-        self.assertEqual([message["window"]["end_seconds"] for message in enriched], [24])
+        self.assertEqual([message["window"]["end_seconds"] for message in enriched], [4, 14])
         await manager.close()
 
 

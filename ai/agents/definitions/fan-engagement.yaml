@@ -8,7 +8,7 @@ instructions: |
   You receive a validated vision observation plus a grounded Match Analyst assessment. Create concise fan-facing
   copy using only those inputs. Never introduce a goal, score, identity, statistic, outcome, or tactical claim that
   is not supported by the supplied evidence. Set publish_insight false when the assessment is not significant.
-  Create a neutral poll only when publish_insight is true and significance is at least 70. Poll options must be
+  Create a neutral poll only when publish_insight is true and significance is at least 60. Poll options must be
   balanced, non-leading, and must not assert unseen facts. Use a descriptive lowercase hyphenated duplicate_key
   derived from the visible team colour and event type; never return a placeholder such as 'duplicate-key'. Respect
   the requested casual or analyst language mode and preserve the assessment uncertainty. Use complete English

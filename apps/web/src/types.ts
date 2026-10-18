@@ -1,6 +1,6 @@
 export type ViewerMode = 'casual' | 'analyst'
 export type MatchEvent = {id:string;matchSecond:number;videoSecond:number;type:string;title:string;detail:string;candidate?:boolean}
-export type Poll = {id:string;eventId:string;question:string;options:{id:string;label:string}[];significance:number;reason:string;agentTrace:string[]}
+export type Poll = {id:string;eventId:string;question:string;options:{id:string;label:string}[];significance:number;reason:string;agentTrace:string[];expiresAt:number}
 export type Counts = Record<string,number>
 export type VisionObservation = {video_timestamp_seconds:number;event_type:string;team:string;description:string;evidence:string;evidence_basis:string;confidence:'low'|'medium'|'high';is_significant:boolean}
 export type VisionInsight = {publish_insight:boolean;significance:number;headline:string;explanation:string;uncertainty_note:string|null;poll:{question:string;options:{id:string;label:string}[];duplicate_key:string}|null}

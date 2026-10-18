@@ -27,6 +27,7 @@ Broadcast = Callable[[dict], Awaitable[None]]
 class ActivityStore(Protocol):
     def record_analysis(self, session_id: str, payload: dict[str, Any]) -> None: ...
 logger = logging.getLogger("uvicorn.error")
+POLL_SIGNIFICANCE_THRESHOLD = 60
 
 
 @dataclass
@@ -39,7 +40,6 @@ class SessionState:
     pending_agent: AgentWork | None = None
     agent_worker: asyncio.Task | None = None
     last_accepted_end: float = -1
-    last_delivered_end: float = -1
     last_poll_at: float = -999
     poll_keys: set[str] = field(default_factory=set)
 
@@ -74,7 +74,6 @@ class AnalysisManager:
             state.pending = None
             state.pending_agent = None
             state.last_accepted_end = -1
-            state.last_delivered_end = -1
             state.poll_keys.clear()
             state.last_poll_at = -999
         state.generation = update.generation
@@ -189,7 +188,6 @@ class AnalysisManager:
                     await self._deliver_result(
                         session_id, generation, window, observation, vision_result, direct_result, started
                     )
-                    state.last_delivered_end = window.frames[-1].timestamp_seconds
                     logger.info(
                         "fanpulse vision_delivered session=%s generation=%d timestamp=%.3f vision_ms=%d total_ms=%d",
                         session_id,
@@ -255,9 +253,9 @@ class AnalysisManager:
                     )
                     if not self._is_current(
                         state, work.generation, work.window.frames[-1].timestamp_seconds
-                    ) or work.window.frames[-1].timestamp_seconds != state.last_delivered_end:
+                    ):
                         logger.info(
-                            "fanpulse result_discarded session=%s generation=%d stage=agent reason=stale_or_superseded",
+                            "fanpulse result_discarded session=%s generation=%d stage=agent reason=stale_playback",
                             session_id,
                             work.generation,
                         )
@@ -397,9 +395,10 @@ class AnalysisManager:
             return decision.model_copy(update={"publish_insight": False, "poll": None})
         poll = decision.poll
         if poll is not None:
+            below_threshold = decision.significance < POLL_SIGNIFICANCE_THRESHOLD
             duplicate = poll.duplicate_key in state.poll_keys
             cooling_down = observation.video_timestamp_seconds - state.last_poll_at < 14
-            if duplicate or cooling_down:
+            if below_threshold or duplicate or cooling_down:
                 decision = decision.model_copy(update={"poll": None})
             else:
                 state.poll_keys.add(poll.duplicate_key)

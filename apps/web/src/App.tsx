@@ -4,6 +4,8 @@ import { Activity, Bot, ChevronRight, CircleDot, Gauge, Pause, Play, Radio, Refr
 import type { Counts, MatchEvent, Poll, ViewerMode, VisionResultMessage } from './types'
 
 const ANALYSIS_INTERVAL_SECONDS=10
+const POLL_SIGNIFICANCE_THRESHOLD=60
+const POLL_VOTING_SECONDS=45
 const viewerId=localStorage.getItem('fanpulse-viewer-id') || crypto.randomUUID()
 localStorage.setItem('fanpulse-viewer-id',viewerId)
 const analysisSessionId=sessionStorage.getItem('fanpulse-analysis-session') || crypto.randomUUID()
@@ -14,6 +16,7 @@ function App(){
   const [clock,setClock]=useState(0), [playing,setPlaying]=useState(false), [rate,setRate]=useState(1)
   const [mode,setMode]=useState<ViewerMode>('casual'), [timeline,setTimeline]=useState<MatchEvent[]>([])
   const [poll,setPoll]=useState<Poll|null>(null), [counts,setCounts]=useState<Counts>({}), [voted,setVoted]=useState<string|null>(null)
+  const [pollClock,setPollClock]=useState(0)
   const [connected,setConnected]=useState(false), [videoMissing,setVideoMissing]=useState(false), [duration,setDuration]=useState(0)
   const [analysisStatus,setAnalysisStatus]=useState('paused'), [analysisLatency,setAnalysisLatency]=useState<number|null>(null)
   const [latestResult,setLatestResult]=useState<VisionResultMessage|null>(null)
@@ -21,19 +24,32 @@ function App(){
   const nextSampleAt=useRef(0), lastWindowEnd=useRef(-1), lastStateSecond=useRef(-1), pollId=useRef<string|null>(null)
 
   const applyVisionResult=useCallback((message:VisionResultMessage)=>{
-    setLatestResult(message);setAnalysisLatency(message.latency.total_ms);setAnalysisStatus(message.policy.outcome==='published'?'published':'routine')
     const id=`vision-${message.generation}-${message.window.end_seconds}`
-    if(message.provider.agent==='vision-direct'){setPoll(null);setVoted(null);setCounts({})}
-    if(!message.insight.publish_insight){
-      if(message.provider.agent!=='vision-direct')setTimeline(previous=>previous.filter(item=>item.id!==id))
+    if(message.provider.agent!=='vision-direct'){
+      if(message.insight.publish_insight&&message.insight.significance>=POLL_SIGNIFICANCE_THRESHOLD&&message.insight.poll){
+        setPoll({id:`poll-${id}`,eventId:id,question:message.insight.poll.question,options:message.insight.poll.options,significance:message.insight.significance,reason:message.insight.explanation,agentTrace:[`Vision model · ${message.latency.vision_ms}ms`,`Match Analyst · ${message.latency.match_analyst_ms}ms`,`Fan Engagement · ${message.latency.fan_engagement_ms}ms`,'Policy · 60+ significance and dedup passed',`WebSocket · delivered · ${message.latency.total_ms}ms`],expiresAt:Date.now()+POLL_VOTING_SECONDS*1000});setPollClock(Date.now());setVoted(null);setCounts({})
+      }
       return
     }
-    const event:MatchEvent={id,matchSecond:Math.round(message.window.end_seconds),videoSecond:message.window.end_seconds,type:message.observation.event_type,title:message.insight.headline,detail:message.insight.explanation,candidate:message.insight.significance>=70}
+    setLatestResult(message);setAnalysisLatency(message.latency.total_ms);setAnalysisStatus('published')
+    if(!message.insight.publish_insight){
+      return
+    }
+    const event:MatchEvent={id,matchSecond:Math.round(message.window.end_seconds),videoSecond:message.window.end_seconds,type:message.observation.event_type,title:message.insight.headline,detail:message.insight.explanation,candidate:message.insight.significance>=POLL_SIGNIFICANCE_THRESHOLD}
     setTimeline(previous=>[event,...previous.filter(item=>item.id!==id)].slice(0,7))
-    if(message.insight.poll){setPoll({id:`poll-${id}`,eventId:id,question:message.insight.poll.question,options:message.insight.poll.options,significance:message.insight.significance,reason:message.insight.explanation,agentTrace:[`Vision model · ${message.latency.vision_ms}ms`,`Match Analyst · ${message.latency.match_analyst_ms}ms`,`Fan Engagement · ${message.latency.fan_engagement_ms}ms`,'Policy · threshold and dedup passed',`WebSocket · delivered · ${message.latency.total_ms}ms`]});setVoted(null);setCounts({})}
   },[])
 
   useEffect(()=>{pollId.current=poll?.id||null},[poll?.id])
+  useEffect(()=>{
+    if(!poll||voted)return
+    const update=()=>{
+      const now=Date.now();setPollClock(now)
+      if(now>=poll.expiresAt)setPoll(current=>current?.id===poll.id?null:current)
+    }
+    update()
+    const timer=window.setInterval(update,250)
+    return()=>window.clearInterval(timer)
+  },[poll,voted])
   useEffect(()=>{
     const protocol=location.protocol==='https:'?'wss':'ws'
     let disposed=false,ws:WebSocket|undefined,reconnectTimer:number|undefined
@@ -96,7 +112,7 @@ function App(){
   },[clock,mode,playing,postPlaybackState,videoMissing])
 
   async function vote(optionId:string){
-    if(voted||!poll)return
+    if(voted||!poll||Date.now()>=poll.expiresAt){setPoll(null);return}
     setVoted(optionId)
     try{
       const response=await fetch('/api/votes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({poll_id:poll.id,option_id:optionId,viewer_id:viewerId})})
@@ -111,6 +127,7 @@ function App(){
   }
   function toggle(){if(!videoMissing&&video.current){if(video.current.paused)void video.current.play();else video.current.pause()}}
   const total=Object.values(counts).reduce((sum,count)=>sum+count,0)
+  const pollSecondsRemaining=poll?Math.max(0,Math.ceil((poll.expiresAt-pollClock)/1000)):0
   const time=useMemo(()=>`${Math.floor(clock/60).toString().padStart(2,'0')}:${Math.floor(clock%60).toString().padStart(2,'0')}`,[clock])
 
   return <main>
@@ -132,7 +149,7 @@ function App(){
         <div className="panel-heading"><div><span className="eyebrow"><Bot/> FOUNDRY AGENT TEAM</span><h2>Live intelligence</h2><small className="analysis-meta">{analysisStatus}{analysisLatency!==null?` · ${(analysisLatency/1000).toFixed(1)}s`:''}</small></div><span className={connected?'status connected':'status'}>{connected?'Connected':'Disconnected'}</span></div>
         <div className="intelligence-stack">
           <AnimatePresence mode="wait">{latestResult?<ObservationCard key={`${latestResult.generation}-${latestResult.window.end_seconds}`} result={latestResult}/>:<EmptyState/>}</AnimatePresence>
-          <AnimatePresence>{poll&&<PollCard key={poll.id+mode} poll={poll} counts={counts} total={total} voted={voted} vote={vote}/>}</AnimatePresence>
+          <AnimatePresence>{poll&&<PollCard key={poll.id+mode} poll={poll} counts={counts} total={total} voted={voted} secondsRemaining={pollSecondsRemaining} vote={vote}/>}</AnimatePresence>
         </div>
         <AgentTrace poll={poll} result={latestResult}/>
       </aside>
@@ -141,11 +158,11 @@ function App(){
   </main>
 }
 
-function PollCard({poll,counts,total,voted,vote}:{poll:Poll;counts:Counts;total:number;voted:string|null;vote:(id:string)=>void}){
-  return <motion.div className="poll-card" initial={{opacity:0,y:18}} animate={{opacity:1,y:0}} exit={{opacity:0,y:10}}><div className="signal"><Users/><span>FAN ENGAGEMENT</span><b>{poll.significance}</b></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
+function PollCard({poll,counts,total,voted,secondsRemaining,vote}:{poll:Poll;counts:Counts;total:number;voted:string|null;secondsRemaining:number;vote:(id:string)=>void}){
+  return <motion.div className="poll-card" initial={{opacity:0,y:18}} animate={{opacity:1,y:0}} exit={{opacity:0,y:10}}><div className="signal"><Users/><span>FAN ENGAGEMENT</span><b>{poll.significance}</b></div><div className={voted?'poll-timer voted':'poll-timer'}><span>{voted?'VOTE SUBMITTED':'VOTING CLOSES IN'}</span><strong>{voted?'✓':`${secondsRemaining}s`}</strong></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
 }
 function EmptyState(){return <motion.div className="empty" initial={{opacity:0}} animate={{opacity:1}}><div><Gauge/><i/></div><h3>Watching the match</h3><p>Foundry vision, Match Analyst, and Fan Engagement are looking for grounded, meaningful moments. Routine play is shown with its reason instead of becoming a poll.</p></motion.div>}
-function ObservationCard({result}:{result:VisionResultMessage}){const published=result.policy.outcome==='published';return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className={published?'observation-state published':'observation-state'}><Activity/><span>{published?'INSIGHT PUBLISHED':'ROUTINE MOMENT'}</span><b>{result.insight.significance}</b></div><h3>{result.assessment?.summary||result.observation.description}</h3><p>{result.assessment?.rationale||result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>{result.policy.reason.replaceAll('_',' ')}</dd></div></dl>{result.assessment?.uncertainty_note&&<small>{result.assessment.uncertainty_note}</small>}</motion.div>}
+function ObservationCard({result}:{result:VisionResultMessage}){return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className="observation-state published"><Activity/><span>INSIGHT PUBLISHED</span><b>{result.insight.significance}</b></div><h3>{result.observation.description}</h3><p>{result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>Vision direct</dd></div></dl></motion.div>}
 function AgentTrace({poll,result}:{poll:Poll|null;result:VisionResultMessage|null}){const direct=result?.provider.agent==='vision-direct';const trace=result?[`Vision model · ${result.latency.vision_ms}ms`,direct?'Match Analyst · enriching asynchronously':`Match Analyst · ${result.latency.match_analyst_ms}ms · ${result.assessment?.significance??result.insight.significance}/100`,direct?'Fan Engagement · waiting for assessment':result.latency.fan_engagement_ms?`Fan Engagement · ${result.latency.fan_engagement_ms}ms`:'Fan Engagement · skipped for routine play',`Policy · ${result.policy.reason.replaceAll('_',' ')}`,`WebSocket · delivered · ${result.latency.total_ms}ms`]:['Frame sampler · awaiting next window','Vision model · awaiting frames','Match Analyst · standing by','Fan Engagement · standing by','Policy/WebSocket · awaiting decision'];return <div className="trace"><span className="eyebrow">TWO-AGENT FOUNDRY PIPELINE</span>{(poll?.agentTrace||trace).map((item,index)=><div key={`${index}-${item}`}><i className={poll||result?'done':''}>{index+1}</i><span>{item}</span></div>)}</div>}
 function Timeline({items}:{items:MatchEvent[]}){return <section className="timeline"><div className="timeline-title"><span>Match timeline</span><small>VISION OBSERVATIONS</small></div><div className="event-list">{items.length?items.map(event=><motion.div initial={{opacity:0}} animate={{opacity:1}} className="event" key={event.id}><time>{Math.floor(event.matchSecond/60).toString().padStart(2,'0')}:{(event.matchSecond%60).toString().padStart(2,'0')}</time><i className={event.candidate?'hot':''}/><div><strong>{event.title}</strong><span>{event.detail}</span></div></motion.div>):<p className="waiting">Play the video to begin real Foundry analysis.</p>}</div></section>}
 export default App
