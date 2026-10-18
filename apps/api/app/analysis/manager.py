@@ -36,9 +36,20 @@ class SessionState:
     position_seconds: float = 0
     pending: AnalysisWindow | None = None
     worker: asyncio.Task | None = None
+    pending_agent: AgentWork | None = None
+    agent_worker: asyncio.Task | None = None
     last_accepted_end: float = -1
     last_poll_at: float = -999
     poll_keys: set[str] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class AgentWork:
+    generation: int
+    window: AnalysisWindow
+    observation: FootballObservation
+    vision_result: VisionInference
+    started: float
 
 
 class AnalysisManager:
@@ -60,6 +71,7 @@ class AnalysisManager:
         state = self.sessions.setdefault(session_id, SessionState())
         if update.generation != state.generation:
             state.pending = None
+            state.pending_agent = None
             state.last_accepted_end = -1
             state.poll_keys.clear()
             state.last_poll_at = -999
@@ -68,6 +80,7 @@ class AnalysisManager:
         state.position_seconds = update.position_seconds
         if not update.playing:
             state.pending = None
+            state.pending_agent = None
         logger.info(
             "fanpulse playback_state session=%s generation=%d playing=%s timestamp=%.3f",
             session_id,
@@ -165,109 +178,26 @@ class AnalysisManager:
                         vision_result.result.observations,
                         key=lambda item: (item.is_significant, item.confidence == "high"),
                     )
-                    try:
-                        agent_result = await self.analyst.analyze(observation, window.viewer_mode)
-                        logger.info(
-                            "fanpulse agent_complete session=%s generation=%d duration_ms=%d agent=%s publish=%s poll=%s",
-                            session_id,
-                            generation,
-                            agent_result.latency_ms,
-                            agent_result.agent_name,
-                            agent_result.decision.publish_insight,
-                            agent_result.decision.poll is not None,
-                        )
-                    except FoundryRateLimitError:
-                        raise
-                    except Exception as exc:
-                        logger.exception(
-                            "fanpulse agent_error session=%s generation=%d error=%s fallback=deterministic",
-                            session_id,
-                            generation,
-                            str(exc)[:200],
-                        )
-                        agent_result = AgentInference(
-                            decision=self._fallback_decision(observation),
-                            latency_ms=0,
-                            model_deployment="deterministic-fallback",
-                            agent_name="deterministic-fallback",
-                        )
-                    if not self._is_current(state, generation, window.frames[-1].timestamp_seconds):
-                        logger.info(
-                            "fanpulse result_discarded session=%s generation=%d stage=agent reason=stale_playback",
-                            session_id,
-                            generation,
-                        )
-                        continue
-
-                    decision = self._apply_policy(state, observation, agent_result.decision)
-                    if not observation.is_significant:
-                        policy_reason = "vision_not_significant"
-                    elif observation.confidence == "low":
-                        policy_reason = "vision_low_confidence"
-                    elif not decision.publish_insight:
-                        policy_reason = (
-                            "match_analyst_routine"
-                            if agent_result.match_assessment and not agent_result.match_assessment.significant
-                            else "fan_engagement_suppressed"
-                        )
-                    elif agent_result.agent_name == "deterministic-fallback":
-                        policy_reason = "agent_fallback"
-                    else:
-                        policy_reason = "published"
-                    total_ms = round((monotonic() - started) * 1000)
-                    result_message = {
-                        "type": "vision_result",
-                        "session_id": session_id,
-                        "generation": generation,
-                        "window": {
-                            "start_seconds": window.frames[0].timestamp_seconds,
-                            "end_seconds": window.frames[-1].timestamp_seconds,
-                        },
-                        "observation": observation.model_dump(mode="json"),
-                        "insight": decision.model_dump(mode="json"),
-                        "assessment": (
-                            agent_result.match_assessment.model_dump(mode="json")
-                            if agent_result.match_assessment else None
-                        ),
-                        "policy": {
-                            "outcome": "published" if decision.publish_insight else "suppressed",
-                            "reason": policy_reason,
-                        },
-                        "latency": {
-                            "vision_ms": vision_result.latency_ms,
-                            "agent_ms": agent_result.latency_ms,
-                            "match_analyst_ms": agent_result.match_analyst_ms,
-                            "fan_engagement_ms": agent_result.fan_engagement_ms,
-                            "total_ms": total_ms,
-                        },
-                        "provider": {
-                            "vision_model": vision_result.model_deployment,
-                            "agent": agent_result.agent_name,
-                            "agents": agent_result.agents,
-                            "retried_stages": agent_result.retried_stages,
-                        },
-                    }
-                    if self.activity:
-                        try:
-                            await asyncio.to_thread(self.activity.record_analysis, session_id, result_message)
-                        except Exception as exc:
-                            logger.exception(
-                                "fanpulse activity_store_error session=%s generation=%d error=%s",
-                                session_id,
-                                generation,
-                                str(exc)[:200],
-                            )
-                    await self.broadcast(result_message)
+                    direct_result = AgentInference(
+                        decision=self._vision_decision(observation),
+                        latency_ms=0,
+                        model_deployment=vision_result.model_deployment,
+                        agent_name="vision-direct",
+                    )
+                    await self._deliver_result(
+                        session_id, generation, window, observation, vision_result, direct_result, started
+                    )
                     logger.info(
-                        "fanpulse analysis_complete session=%s generation=%d timestamp=%.3f vision_ms=%d agent_ms=%d total_ms=%d delivered=true provider=%s",
+                        "fanpulse vision_delivered session=%s generation=%d timestamp=%.3f vision_ms=%d total_ms=%d",
                         session_id,
                         generation,
                         window.frames[-1].timestamp_seconds,
                         vision_result.latency_ms,
-                        agent_result.latency_ms,
-                        total_ms,
-                        agent_result.agent_name,
+                        round((monotonic() - started) * 1000),
                     )
+                    state.pending_agent = AgentWork(generation, window, observation, vision_result, started)
+                    if state.agent_worker is None or state.agent_worker.done():
+                        state.agent_worker = asyncio.create_task(self._run_agents(session_id, state))
                 except asyncio.CancelledError:
                     raise
                 except FoundryRateLimitError as exc:
@@ -304,6 +234,147 @@ class AnalysisManager:
         finally:
             state.worker = None
 
+    async def _run_agents(self, session_id: str, state: SessionState):
+        try:
+            while state.pending_agent is not None:
+                work = state.pending_agent
+                state.pending_agent = None
+                try:
+                    agent_result = await self.analyst.analyze(work.observation, work.window.viewer_mode)
+                    logger.info(
+                        "fanpulse agent_complete session=%s generation=%d duration_ms=%d agent=%s publish=%s poll=%s",
+                        session_id,
+                        work.generation,
+                        agent_result.latency_ms,
+                        agent_result.agent_name,
+                        agent_result.decision.publish_insight,
+                        agent_result.decision.poll is not None,
+                    )
+                    if not self._is_current(
+                        state, work.generation, work.window.frames[-1].timestamp_seconds
+                    ):
+                        logger.info(
+                            "fanpulse result_discarded session=%s generation=%d stage=agent reason=stale_playback",
+                            session_id,
+                            work.generation,
+                        )
+                        continue
+                    await self._deliver_result(
+                        session_id,
+                        work.generation,
+                        work.window,
+                        work.observation,
+                        work.vision_result,
+                        agent_result,
+                        work.started,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except FoundryRateLimitError as exc:
+                    logger.warning(
+                        "fanpulse agent_skipped session=%s generation=%d stage=%s reason=rate_limited",
+                        session_id,
+                        work.generation,
+                        exc.stage,
+                    )
+                    await self.broadcast({
+                        "type": "analysis_status",
+                        "session_id": session_id,
+                        "generation": work.generation,
+                        "status": "rate_limited",
+                        "message": "Agent enrichment was skipped; live vision analysis will continue.",
+                    })
+                except Exception as exc:
+                    logger.exception(
+                        "fanpulse agent_error session=%s generation=%d error=%s vision_result_preserved=true",
+                        session_id,
+                        work.generation,
+                        str(exc)[:200],
+                    )
+        finally:
+            state.agent_worker = None
+
+    async def _deliver_result(
+        self,
+        session_id: str,
+        generation: int,
+        window: AnalysisWindow,
+        observation: FootballObservation,
+        vision_result: VisionInference,
+        agent_result: AgentInference,
+        started: float,
+    ):
+        decision = self._apply_policy(state=self.sessions[session_id], observation=observation,
+                                      decision=agent_result.decision)
+        if not observation.is_significant:
+            policy_reason = "vision_not_significant"
+        elif observation.confidence == "low":
+            policy_reason = "vision_low_confidence"
+        elif agent_result.agent_name == "vision-direct":
+            policy_reason = "vision_direct"
+        elif not decision.publish_insight:
+            policy_reason = (
+                "match_analyst_routine"
+                if agent_result.match_assessment and not agent_result.match_assessment.significant
+                else "fan_engagement_suppressed"
+            )
+        else:
+            policy_reason = "published"
+        total_ms = round((monotonic() - started) * 1000)
+        result_message = {
+            "type": "vision_result",
+            "session_id": session_id,
+            "generation": generation,
+            "window": {
+                "start_seconds": window.frames[0].timestamp_seconds,
+                "end_seconds": window.frames[-1].timestamp_seconds,
+            },
+            "observation": observation.model_dump(mode="json"),
+            "insight": decision.model_dump(mode="json"),
+            "assessment": (
+                agent_result.match_assessment.model_dump(mode="json")
+                if agent_result.match_assessment else None
+            ),
+            "policy": {
+                "outcome": "published" if decision.publish_insight else "suppressed",
+                "reason": policy_reason,
+            },
+            "latency": {
+                "vision_ms": vision_result.latency_ms,
+                "agent_ms": agent_result.latency_ms,
+                "match_analyst_ms": agent_result.match_analyst_ms,
+                "fan_engagement_ms": agent_result.fan_engagement_ms,
+                "total_ms": total_ms,
+            },
+            "provider": {
+                "vision_model": vision_result.model_deployment,
+                "agent": agent_result.agent_name,
+                "agents": agent_result.agents,
+                "retried_stages": agent_result.retried_stages,
+            },
+        }
+        if self.activity:
+            try:
+                await asyncio.to_thread(self.activity.record_analysis, session_id, result_message)
+            except Exception as exc:
+                logger.exception(
+                    "fanpulse activity_store_error session=%s generation=%d error=%s",
+                    session_id,
+                    generation,
+                    str(exc)[:200],
+                )
+        await self.broadcast(result_message)
+        logger.info(
+            "fanpulse analysis_complete session=%s generation=%d timestamp=%.3f vision_ms=%d agent_ms=%d total_ms=%d delivered=true provider=%s",
+            session_id,
+            generation,
+            window.frames[-1].timestamp_seconds,
+            vision_result.latency_ms,
+            agent_result.latency_ms,
+            total_ms,
+            agent_result.agent_name,
+        )
+
     @staticmethod
     def _is_current(state: SessionState, generation: int, window_end: float) -> bool:
         return (
@@ -333,19 +404,24 @@ class AnalysisManager:
         return decision
 
     @staticmethod
-    def _fallback_decision(observation: FootballObservation) -> MatchAnalystDecision:
+    def _vision_decision(observation: FootballObservation) -> MatchAnalystDecision:
         publish = observation.is_significant and observation.confidence != "low"
         return MatchAnalystDecision(
             publish_insight=publish,
             significance=70 if publish else 30,
             headline=observation.description[:120],
             explanation=observation.evidence[:320],
-            uncertainty_note="Foundry Match Analyst was unavailable; this is a labelled deterministic fallback.",
+            uncertainty_note="Direct vision observation; Foundry agent enrichment may follow.",
             poll=None,
         )
 
     async def close(self):
-        tasks = [state.worker for state in self.sessions.values() if state.worker and not state.worker.done()]
+        tasks = [
+            task
+            for state in self.sessions.values()
+            for task in (state.worker, state.agent_worker)
+            if task and not task.done()
+        ]
         for task in tasks:
             task.cancel()
         if tasks:

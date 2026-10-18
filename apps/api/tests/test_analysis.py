@@ -119,6 +119,17 @@ class MockRoutineAnalyst:
         )
 
 
+class GatedAnalyst(MockAnalyst):
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.calls = 0
+
+    async def analyze(self, item, viewer_mode="casual"):
+        self.calls += 1
+        await self.gate.wait()
+        return await super().analyze(item, viewer_mode)
+
+
 class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
     async def test_rate_limited_window_is_skipped_and_next_window_continues(self):
         messages = []
@@ -181,9 +192,46 @@ class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
         await manager.update_state("s1", PlaybackState(generation=0, playing=True, position_seconds=4))
         await manager.submit("s1", window(0, 0))
         await asyncio.sleep(0.02)
-        result = next(message for message in messages if message["type"] == "vision_result")
+        result = next(
+            message for message in messages
+            if message["type"] == "vision_result" and message["provider"]["agent"] == "mock-match-agent"
+        )
         self.assertEqual(result["policy"], {"outcome": "suppressed", "reason": "match_analyst_routine"})
         self.assertEqual(result["assessment"]["significance"], 25)
+        await manager.close()
+
+    async def test_vision_delivery_and_next_window_do_not_wait_for_agents(self):
+        messages = []
+
+        async def broadcast(message):
+            messages.append(message)
+
+        vision = MockVision()
+        analyst = GatedAnalyst()
+        manager = AnalysisManager(vision, analyst, broadcast)
+        await manager.update_state("s1", PlaybackState(generation=0, playing=True, position_seconds=4))
+        await manager.submit("s1", window(0, 0))
+        await asyncio.sleep(0.01)
+
+        direct = [
+            message for message in messages
+            if message.get("type") == "vision_result" and message["provider"]["agent"] == "vision-direct"
+        ]
+        self.assertEqual(len(direct), 1)
+        self.assertEqual(analyst.calls, 1)
+
+        await manager.update_state("s1", PlaybackState(generation=0, playing=True, position_seconds=24))
+        await manager.submit("s1", window(0, 20))
+        await asyncio.sleep(0.01)
+        self.assertEqual(vision.calls, [4, 24])
+        self.assertEqual(
+            len([
+                message for message in messages
+                if message.get("type") == "vision_result" and message["provider"]["agent"] == "vision-direct"
+            ]),
+            2,
+        )
+        analyst.gate.set()
         await manager.close()
 
 
