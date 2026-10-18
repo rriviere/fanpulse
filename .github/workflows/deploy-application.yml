@@ -55,18 +55,29 @@ jobs:
       - name: Assemble tested application
         run: |
           mkdir -p package/apps/api package/apps/web package/ai
+          printf '%s\n' "${{ github.sha }}" > package/.deployment-revision
           cp requirements.txt package/
           cp apps/api/requirements.txt package/apps/api/
           rsync -a --exclude '__pycache__' --exclude '*.pyc' apps/api/app package/apps/api/
           cp apps/api/__init__.py package/apps/api/
           cp apps/__init__.py package/apps/
-          rsync -a --exclude '__pycache__' --exclude '*.pyc' ai/agents ai/models ai/vision package/ai/
-          cp ai/__init__.py package/ai/
+          rsync -a \
+            --exclude '__pycache__' \
+            --exclude '*.pyc' \
+            --exclude 'tests' \
+            --exclude 'evaluations' \
+            ai/ package/ai/
           cp -R apps/web/dist package/apps/web/
           mkdir -p package/apps/web/dist/media
           python -m pip install \
             --requirement apps/api/requirements.txt \
             --target package/.python_packages/lib/site-packages
+
+      - name: Verify assembled application imports
+        run: |
+          test -f package/ai/foundry_errors.py
+          PYTHONPATH="package/.python_packages/lib/site-packages:package" \
+            python -c "from apps.api.app.main import app; assert app"
 
       - name: Upload tested application artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -162,8 +173,10 @@ jobs:
             --type zip \
             --clean true \
             --restart true \
-            --async true \
-            --track-status false \
+            --async false \
+            --track-status true \
+            --timeout 600000 \
+            --deploymentTag "${{ github.sha }}" \
             --only-show-errors
 
       - name: Resolve application endpoint
@@ -178,13 +191,18 @@ jobs:
       - name: Verify deployed application without AI inference
         env:
           APP_URL: ${{ steps.endpoint.outputs.url }}
+          EXPECTED_REVISION: ${{ github.sha }}
         run: |
           for attempt in {1..40}; do
-            if curl --fail --silent --show-error --max-time 20 "$APP_URL/api/health"; then
+            health=$(curl --fail --silent --show-error --max-time 20 "$APP_URL/api/health" || true)
+            if [[ "$(jq -r '.revision // empty' <<< "$health")" == "$EXPECTED_REVISION" ]] && \
+               [[ "$(jq -r '.vision_analysis_ready // false' <<< "$health")" == "true" ]]; then
+              echo "$health"
               break
             fi
+            echo "Waiting for revision $EXPECTED_REVISION; current health: ${health:-unavailable}"
             if [[ "$attempt" == 40 ]]; then
-              echo "Application did not become healthy" >&2
+              echo "Expected application revision did not become healthy" >&2
               exit 1
             fi
             sleep 15

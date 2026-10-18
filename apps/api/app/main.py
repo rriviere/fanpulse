@@ -18,6 +18,15 @@ analysis_manager: AnalysisManager | None = None
 logger = logging.getLogger("uvicorn.error")
 
 
+def deployed_revision() -> str:
+    """Return the immutable source revision included in the deployment package."""
+    revision_file = Path(__file__).resolve().parents[3] / ".deployment-revision"
+    try:
+        return revision_file.read_text(encoding="utf-8").strip() or "development"
+    except OSError:
+        return "development"
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global analysis_manager
@@ -109,6 +118,7 @@ async def broadcast(message: dict):
 def health():
     return {
         "status": "ok",
+        "revision": deployed_revision(),
         "ai_provider": "foundry" if analysis_manager else "unconfigured",
         "vision_analysis_ready": analysis_manager is not None,
         "activity_store": "cosmos" if isinstance(store, CosmosStore) else "sqlite",
