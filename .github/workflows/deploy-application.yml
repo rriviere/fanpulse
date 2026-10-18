@@ -8,7 +8,7 @@ permissions:
 
 concurrency:
   group: fanpulse-development-deployment
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PYTHON_VERSION: '3.12'
@@ -158,7 +158,7 @@ jobs:
             --type zip \
             --clean true \
             --restart true \
-            --track-status true \
+            --track-status false \
             --only-show-errors
 
       - name: Resolve application endpoint
