@@ -28,10 +28,10 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-          cache-dependency-path: apps/api/requirements.txt
+          cache-dependency-path: apps/api/requirements-dev.txt
 
       - name: Install Foundry deployment dependencies
-        run: python -m pip install -r apps/api/requirements.txt
+        run: python -m pip install -r apps/api/requirements-dev.txt
 
       - name: Validate model profiles, agents, and schemas
         run: |
