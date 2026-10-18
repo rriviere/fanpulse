@@ -39,7 +39,7 @@ jobs:
           python -m pytest ai/tests/test_configuration.py -q
 
   publish:
-    name: Approve and publish agents
+    name: Publish agents
     needs: validate
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest

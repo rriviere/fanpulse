@@ -179,7 +179,7 @@ artifact to App Service, and publishes declarative Foundry agent versions throug
 a separate protected workflow. Both use Azure OIDC. Infrastructure remains an
 explicit `azd provision` operation. See
 [GitHub application delivery](docs/GITHUB_DEPLOYMENT.md) for the trust setup,
-environment variables, private-video upload, approvals, and rollback process.
+environment variables, private-video upload, manual releases, and rollback process.
 
 ## Rules checklist
 
