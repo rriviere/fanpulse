@@ -64,6 +64,9 @@ jobs:
           cp ai/__init__.py package/ai/
           cp -R apps/web/dist package/apps/web/
           mkdir -p package/apps/web/dist/media
+          python -m pip install \
+            --requirement apps/api/requirements.txt \
+            --target package/.python_packages/lib/site-packages
 
       - name: Upload tested application artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
