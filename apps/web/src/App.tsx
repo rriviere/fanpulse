@@ -6,6 +6,7 @@ import type { Counts, MatchEvent, Poll, ViewerMode, VisionResultMessage } from '
 const ANALYSIS_INTERVAL_SECONDS=10
 const POLL_SIGNIFICANCE_THRESHOLD=60
 const POLL_VOTING_SECONDS=45
+const VOTED_POLL_DISPLAY_SECONDS=5
 const viewerId=localStorage.getItem('fanpulse-viewer-id') || crypto.randomUUID()
 localStorage.setItem('fanpulse-viewer-id',viewerId)
 const analysisSessionId=sessionStorage.getItem('fanpulse-analysis-session') || crypto.randomUUID()
@@ -49,6 +50,15 @@ function App(){
     update()
     const timer=window.setInterval(update,250)
     return()=>window.clearInterval(timer)
+  },[poll,voted])
+  useEffect(()=>{
+    if(!poll||!voted)return
+    const pollIdToClear=poll.id
+    const timer=window.setTimeout(()=>{
+      if(pollId.current!==pollIdToClear)return
+      setPoll(null);setVoted(null);setCounts({})
+    },VOTED_POLL_DISPLAY_SECONDS*1000)
+    return()=>window.clearTimeout(timer)
   },[poll,voted])
   useEffect(()=>{
     const protocol=location.protocol==='https:'?'wss':'ws'
