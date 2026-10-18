@@ -174,7 +174,7 @@ jobs:
             --clean true \
             --restart true \
             --async false \
-            --track-status true \
+            --track-status false \
             --timeout 600000 \
             --deploymentTag "${{ github.sha }}" \
             --only-show-errors
