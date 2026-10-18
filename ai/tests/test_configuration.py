@@ -4,6 +4,19 @@ from ai.agents.loader import load_agent_configurations
 from ai.models.loader import load_model_profiles
 
 
+FOUNDRY_UNSUPPORTED_SCHEMA_KEYWORDS = {"allOf", "if", "then", "not"}
+
+
+def _schema_keywords(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield key
+            yield from _schema_keywords(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _schema_keywords(child)
+
+
 def test_declarative_foundry_configuration_loads():
     models = load_model_profiles()
     agents = load_agent_configurations(model_profiles=models)
@@ -47,3 +60,9 @@ def test_agent_response_schemas_accept_representative_outputs():
         },
         agents["fan-engagement"].response_schema,
     )
+
+
+def test_agent_response_schemas_use_foundry_supported_subset():
+    for agent in load_agent_configurations().values():
+        unsupported = FOUNDRY_UNSUPPORTED_SCHEMA_KEYWORDS.intersection(_schema_keywords(agent.response_schema))
+        assert not unsupported, f"{agent.id} uses unsupported Foundry schema keywords: {sorted(unsupported)}"

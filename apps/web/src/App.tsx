@@ -3,9 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Activity, Bot, ChevronRight, CircleDot, Gauge, Pause, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import type { Counts, MatchEvent, Poll, ViewerMode, VisionResultMessage } from './types'
 
-// Keep real-time analysis useful without exhausting the Foundry request quota
-// during continuous playback. Each window still contains five consecutive frames.
-const ANALYSIS_INTERVAL_SECONDS=15
+const ANALYSIS_INTERVAL_SECONDS=10
 const viewerId=localStorage.getItem('fanpulse-viewer-id') || crypto.randomUUID()
 localStorage.setItem('fanpulse-viewer-id',viewerId)
 const analysisSessionId=sessionStorage.getItem('fanpulse-analysis-session') || crypto.randomUUID()

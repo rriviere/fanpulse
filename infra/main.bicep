@@ -82,7 +82,7 @@ module visionModel './modules/model-deployment.bicep' = {
     modelName: 'gpt-5-mini'
     modelVersion: '2025-08-07'
     skuName: 'GlobalStandard'
-    capacity: 10
+    capacity: 30
   }
 }
 

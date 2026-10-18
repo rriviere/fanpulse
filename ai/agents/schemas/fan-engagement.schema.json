@@ -37,24 +37,12 @@
               "type": "string",
               "minLength": 3,
               "maxLength": 100,
-              "pattern": "^[a-z0-9-]+$",
-              "not": {"enum": ["duplicate-key", "poll-key", "placeholder"]}
+              "pattern": "^[a-z0-9-]+$"
             }
           }
         },
         {"type": "null"}
       ]
     }
-  },
-  "allOf": [
-    {
-      "if": {"properties": {"poll": {"type": "object"}}, "required": ["poll"]},
-      "then": {
-        "properties": {
-          "publish_insight": {"const": true},
-          "significance": {"minimum": 70}
-        }
-      }
-    }
-  ]
+  }
 }

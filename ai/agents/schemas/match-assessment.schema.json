@@ -11,11 +11,5 @@
     "uncertainty_note": {
       "anyOf": [{"type": "string", "maxLength": 200}, {"type": "null"}]
     }
-  },
-  "allOf": [
-    {
-      "if": {"properties": {"significant": {"const": false}}, "required": ["significant"]},
-      "then": {"properties": {"significance": {"maximum": 69}}}
-    }
-  ]
+  }
 }
