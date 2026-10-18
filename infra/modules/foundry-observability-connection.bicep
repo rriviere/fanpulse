@@ -71,6 +71,18 @@ resource foundryTracePublisher 'Microsoft.Authorization/roleAssignments@2022-04-
   }
 }
 
+// Foundry Insights reads the traces previously written by the project identity.
+// Publishing and reading are separate permissions, so both roles are required.
+resource foundryInsightsReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(applicationInsightsId, projectPrincipalId, 'Monitoring Reader')
+  scope: applicationInsights
+  properties: {
+    principalId: projectPrincipalId
+    principalType: 'ServicePrincipal'
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '43d0d8ad-25c7-4714-9337-8ba259a9fe05')
+  }
+}
+
 resource agentTracePublisher 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(agentPrincipalId)) {
   name: guid(applicationInsightsId, agentPrincipalId, 'Monitoring Metrics Publisher')
   scope: applicationInsights

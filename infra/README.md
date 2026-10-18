@@ -40,7 +40,7 @@ The template automatically uses the signed-in `azd` principal where available to
 azd env unset AZURE_PRINCIPAL_ID
 ```
 
-For observability, the project managed identity and the configured Match Analyst and Fan Engagement runtime identities receive `Monitoring Metrics Publisher` on Application Insights, while the configured developer receives `Log Analytics Reader`. Local/key-based Application Insights ingestion is disabled, and no telemetry connection string is emitted as an azd output.
+For observability, the project managed identity receives `Monitoring Metrics Publisher` and `Monitoring Reader` on Application Insights so it can publish traces and run Foundry Insights. The configured Match Analyst and Fan Engagement runtime identities receive `Monitoring Metrics Publisher`, while the configured developer receives `Log Analytics Reader`. Local/key-based Application Insights ingestion is disabled, and no telemetry connection string is emitted as an azd output.
 
 Validate before creating anything:
 
