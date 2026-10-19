@@ -50,7 +50,7 @@ par Immediate user feedback
     Manager -> WS: Publish direct vision insight
     WS -> React: vision_result
     React -> React: Display latest insight
-and Background agent processing
+else Background agent processing
     Manager -> Analyst: Send structured observation
     activate Analyst
     Analyst --> Manager: Significance assessment,\nrationale and uncertainty
