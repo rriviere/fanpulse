@@ -1,0 +1,88 @@
+@startuml
+title FanPulse — Current Live Flow
+
+autonumber
+
+actor Viewer
+
+box "Browser" #EDE7F6
+participant "React Application" as React
+participant "Video Player" as Video
+end box
+
+box "Azure App Service" #E3F2FD
+participant "FastAPI" as API
+participant "AnalysisManager\nCustom Python orchestration" as Manager
+participant "WebSocket Broadcaster" as WS
+end box
+
+box "Microsoft Foundry" #FFF3E0
+participant "GPT-5-mini\nVision model deployment" as Vision <<Model>>
+participant "Match Analyst" as Analyst <<Agent>>
+participant "Fan Engagement" as Engagement <<Agent>>
+end box
+
+database "Cosmos DB" as Cosmos
+
+Viewer -> Video: Press Play
+activate Video
+
+loop Approximately one frame per second
+    Video -> React: Current video frame and timestamp
+    React -> React: Add frame to rolling buffer
+end
+
+React -> API: Submit five-frame window\nwith timestamps and viewer mode
+API -> Manager: Queue analysis window
+
+note right of Manager
+Only one inference runs at a time.
+If busy, retain only the newest
+pending frame window.
+end note
+
+Manager -> Vision: Send ordered JPEG frames
+activate Vision
+Vision --> Manager: Structured visible observation\nand direct insight
+deactivate Vision
+
+par Immediate user feedback
+    Manager -> WS: Publish direct vision insight
+    WS -> React: vision_result
+    React -> React: Display latest insight
+and Background agent processing
+    Manager -> Analyst: Send structured observation
+    activate Analyst
+    Analyst --> Manager: Significance assessment,\nrationale and uncertainty
+    deactivate Analyst
+
+    alt Significant and policy threshold reached
+        Manager -> Engagement: Observation + assessment\n+ Casual/Tactical mode
+        activate Engagement
+        Engagement --> Manager: Poll question and options
+        deactivate Engagement
+
+        Manager -> Manager: Apply significance,\ncooldown and duplicate rules
+        Manager -> Cosmos: Store activity and poll
+        Manager -> WS: Publish significant poll
+        WS -> React: Poll and voting deadline
+        React -> React: Display poll beneath insight
+    else Routine or insufficient evidence
+        Manager -> Manager: Suppress fan poll
+    end
+end
+
+Viewer -> React: Submit vote
+React -> API: POST vote
+API -> Cosmos: Store vote
+Cosmos --> API: Updated counts
+API -> WS: Publish vote results
+WS -> React: Updated percentages
+
+note over React
+Poll closes after 45 seconds,
+or clears 5 seconds after voting.
+Video playback never waits for AI.
+end note
+
+@enduml

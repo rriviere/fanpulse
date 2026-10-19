@@ -1,0 +1,133 @@
+@startuml
+title FanPulse — Proposed Agent Framework Workflow with Decision-1
+
+autonumber
+
+actor Viewer
+
+box "Browser" #EDE7F6
+participant "React Application" as React
+participant "Video Player" as Video
+end box
+
+box "Azure App Service" #E3F2FD
+participant "FastAPI" as API
+participant "WebSocket Broadcaster" as WS
+end box
+
+box "Microsoft Agent Framework Workflow" #E8F5E9
+participant "Vision Executor" as VisionExecutor <<Executor>>
+participant "Match Analyst Node" as AnalystNode <<Agent Node>>
+participant "Moment Decision Executor" as DecisionExecutor <<Executor>>
+participant "Fan Engagement Node" as EngagementNode <<Agent Node>>
+participant "Policy Executor" as PolicyExecutor <<Executor>>
+participant "Broadcast Executor" as BroadcastExecutor <<Executor>>
+end box
+
+box "Microsoft Foundry" #FFF3E0
+participant "GPT-5-mini" as Vision <<Model>>
+participant "Match Analyst" as Analyst <<Agent>>
+participant "Microsoft-Decision-1" as Decision <<Model>>
+participant "Fan Engagement" as Engagement <<Agent>>
+end box
+
+database "Cosmos DB" as Cosmos
+
+Viewer -> Video: Press Play
+activate Video
+
+loop Approximately one frame per second
+    Video -> React: Current video frame and timestamp
+    React -> React: Add frame to rolling buffer
+end
+
+React -> API: Submit five-frame window\nwith timestamps and viewer mode
+API -> VisionExecutor: Start workflow turn
+
+group Immediate vision path
+    VisionExecutor -> Vision: Send ordered JPEG frames
+    activate Vision
+    Vision --> VisionExecutor: Structured visible observation
+    deactivate Vision
+
+    VisionExecutor -> BroadcastExecutor: Direct insight event
+    BroadcastExecutor -> WS: Publish immediate insight
+    WS -> React: vision_result
+    React -> React: Display latest insight
+end
+
+note over React,VisionExecutor
+Video playback and immediate insights
+remain independent of the remaining workflow.
+end note
+
+group Background decision workflow
+    VisionExecutor -> AnalystNode: Structured observation
+    AnalystNode -> Analyst: Assess football significance
+    activate Analyst
+    Analyst --> AnalystNode: Assessment, rationale,\nuncertainty and score
+    deactivate Analyst
+
+    AnalystNode -> DecisionExecutor: Observation + assessment
+
+    note right of DecisionExecutor
+    Executor builds bounded questions:
+    • Is it grounded?
+    • How significant is it?
+    • Should engagement be created?
+    end note
+
+    DecisionExecutor -> Decision: Decision API request\nwith structured JSON
+    activate Decision
+    Decision --> DecisionExecutor: Calibrated probabilities
+    deactivate Decision
+
+    alt Grounded and poll probability exceeds thresholds
+        DecisionExecutor -> EngagementNode: PollApproved event
+        EngagementNode -> Engagement: Observation + assessment\n+ decision + viewer mode
+        activate Engagement
+        Engagement --> EngagementNode: Audience-specific poll
+        deactivate Engagement
+
+        EngagementNode -> PolicyExecutor: Poll candidate
+        PolicyExecutor -> PolicyExecutor: Enforce cooldown,\ndeduplication and expiry
+        PolicyExecutor -> Cosmos: Store decision and poll
+        PolicyExecutor -> BroadcastExecutor: PublishPoll event
+        BroadcastExecutor -> WS: Deliver poll
+        WS -> React: Significant moment and poll
+        React -> React: Animate poll beneath insight
+    else Insight only
+        DecisionExecutor -> PolicyExecutor: InsightOnly event
+        PolicyExecutor -> Cosmos: Store decision outcome
+    else Suppressed or insufficiently grounded
+        DecisionExecutor -> PolicyExecutor: Suppressed event
+        PolicyExecutor -> Cosmos: Store decision outcome
+    end
+end
+
+Viewer -> React: Submit vote
+React -> API: POST vote
+API -> Cosmos: Store vote
+Cosmos --> API: Updated counts
+API -> WS: Publish vote results
+WS -> React: Updated percentages
+
+group Failure handling
+    alt Vision 429 or timeout
+        VisionExecutor -> BroadcastExecutor: Skip window
+    else Match Analyst failure
+        AnalystNode -> BroadcastExecutor: Retain direct insight only
+    else Decision-1 429 or timeout
+        DecisionExecutor -> BroadcastExecutor: Suppress poll safely
+    else Fan Engagement failure
+        EngagementNode -> BroadcastExecutor: Retain direct insight only
+    end
+end
+
+note over React,BroadcastExecutor
+Playback continues during every workflow stage.
+Seeking changes the generation, causing stale
+workflow results to be discarded.
+end note
+
+@enduml

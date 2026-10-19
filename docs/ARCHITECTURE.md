@@ -53,6 +53,15 @@ typed application contracts, not embedded agent definitions.
 
 ## Progressive analysis and two-agent Foundry pipeline
 
+The detailed sequence diagrams are maintained as PlantUML sources:
+
+- [`diagrams/current-live-flow.puml`](diagrams/current-live-flow.puml) documents
+  the implemented FastAPI `AnalysisManager` orchestration.
+- [`diagrams/proposed-decision-workflow.puml`](diagrams/proposed-decision-workflow.puml)
+  documents the proposed Microsoft Agent Framework workflow with a
+  Microsoft-Decision-1 decision gate. It is a design proposal, not the current
+  runtime implementation.
+
 ```text
 HTML5 video playback
   ├─ pause / resume / seek state ───────────────┐
