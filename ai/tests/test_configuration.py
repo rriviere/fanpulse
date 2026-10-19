@@ -1,5 +1,8 @@
+import pytest
 from jsonschema import validate
+from pydantic import ValidationError
 
+from ai.agents.contracts import AgentPoll, AgentPollOption, FanEngagementDecision
 from ai.agents.loader import load_agent_configurations
 from ai.models.loader import load_model_profiles
 
@@ -66,3 +69,31 @@ def test_agent_response_schemas_use_foundry_supported_subset():
     for agent in load_agent_configurations().values():
         unsupported = FOUNDRY_UNSUPPORTED_SCHEMA_KEYWORDS.intersection(_schema_keywords(agent.response_schema))
         assert not unsupported, f"{agent.id} uses unsupported Foundry schema keywords: {sorted(unsupported)}"
+
+
+def test_fan_engagement_poll_threshold_matches_declared_sixty():
+    poll = AgentPoll(
+        question="What happens next?",
+        options=[
+            AgentPollOption(id="attack", label="Attack continues"),
+            AgentPollOption(id="recover", label="Defence recovers"),
+        ],
+        duplicate_key="green-attacking-sequence",
+    )
+    accepted = FanEngagementDecision(
+        publish_insight=True,
+        significance=60,
+        headline="Green advance",
+        explanation="A visible attacking sequence is developing.",
+        poll=poll,
+    )
+    assert accepted.poll == poll
+
+    with pytest.raises(ValidationError, match="significance >= 60"):
+        FanEngagementDecision(
+            publish_insight=True,
+            significance=59,
+            headline="Green advance",
+            explanation="A visible attacking sequence is developing.",
+            poll=poll,
+        )

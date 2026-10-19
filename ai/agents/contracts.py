@@ -52,8 +52,8 @@ class FanEngagementDecision(BaseModel):
 
     @model_validator(mode="after")
     def enforce_poll_threshold(self):
-        if self.poll is not None and (not self.publish_insight or self.significance < 70):
-            raise ValueError("polls require a published insight with significance >= 70")
+        if self.poll is not None and (not self.publish_insight or self.significance < 60):
+            raise ValueError("polls require a published insight with significance >= 60")
         return self
 
 
