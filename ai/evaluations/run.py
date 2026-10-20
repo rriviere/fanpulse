@@ -130,6 +130,14 @@ def write_reports(results_dir: Path, items: list[dict], run) -> tuple[Path, Path
     return markdown_path, json_path
 
 
+def write_pipeline_results(results_dir: Path, items: list[dict]) -> Path:
+    """Retain expensive pipeline outputs even when Foundry grading cannot start."""
+    results_dir.mkdir(parents=True, exist_ok=True)
+    path = results_dir / "pipeline-results.json"
+    path.write_text(json.dumps({"items": items}, indent=2) + "\n")
+    return path
+
+
 async def run(video: Path, results_dir: Path):
     configuration, cases = load_evaluation()
     if not video.is_file():
@@ -151,6 +159,8 @@ async def run(video: Path, results_dir: Path):
     finally:
         vision.close()
         agents.close()
+    pipeline_path = write_pipeline_results(results_dir, items)
+    print(f"Pipeline results: {pipeline_path}")
     foundry_run = await asyncio.to_thread(submit_foundry_run, items, configuration.configuration_hash(cases))
     markdown_path, json_path = write_reports(results_dir, items, foundry_run)
     print(f"Foundry evaluation: {foundry_run.report_url}")

@@ -30,3 +30,9 @@ publishing the agents and evaluation definition, it retrieves the licensed video
 from private Blob Storage, runs the evaluation, submits it to Foundry, and retains
 the Markdown and JSON reports as a GitHub artifact.
 
+The GitHub workload identity needs `Foundry User` at the Foundry **account**
+scope because the grading stage invokes the judge model. Project-only access is
+not sufficient for that inference. Pipeline outputs are written before grading
+begins so a grading or permissions failure does not discard the paid inference
+evidence.
+

@@ -6,6 +6,7 @@ from ai.agents.contracts import AgentPoll, AgentPollOption, FanEngagementDecisio
 from ai.agents.loader import load_agent_configurations
 from ai.evaluations.loader import load_evaluation
 from ai.evaluations.provision import ITEM_SCHEMA, build_testing_criteria
+from ai.evaluations.run import write_pipeline_results
 from ai.models.loader import load_model_profiles
 
 
@@ -121,3 +122,10 @@ def test_evaluation_definition_uses_grounding_and_poll_criteria():
     assert ITEM_SCHEMA["additionalProperties"] is False
     assert [criterion["name"] for criterion in criteria] == ["grounded_observation", "correct_poll_decision"]
     assert [criterion["type"] for criterion in criteria] == ["label_model", "string_check"]
+
+
+def test_pipeline_results_are_retained_before_cloud_grading(tmp_path):
+    path = write_pipeline_results(tmp_path, [{"case_id": "routine-midfield-opening", "actual_poll": "false"}])
+
+    assert path.name == "pipeline-results.json"
+    assert '"case_id": "routine-midfield-opening"' in path.read_text()

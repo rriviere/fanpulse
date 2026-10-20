@@ -27,7 +27,7 @@ Grant that service principal only:
 
 - `Website Contributor` on the FanPulse App Service.
 - `Storage Blob Data Reader` on the private `football-videos` container.
-- `Foundry User` (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) on the `fanpulse-dev` Foundry project.
+- `Foundry User` (`53ca6127-db72-4b80-b1b0-d745d6d5456d`) on the `fanpulse-dev` Foundry account. Account scope is required because the deployment pipeline runs an evaluation that invokes the judge model; project scope alone can publish project assets but does not authorize model inference for evaluation.
 - `Reader` on the parent Foundry account.
 
 No client secret or App Service publish profile is required.
