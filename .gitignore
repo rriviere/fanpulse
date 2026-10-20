@@ -11,4 +11,6 @@ __pycache__/
 .azure/
 apps/web/public/media/*
 !apps/web/public/media/README.md
+ai/evaluations/results/*
+!ai/evaluations/results/.gitkeep
 

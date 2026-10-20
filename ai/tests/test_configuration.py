@@ -4,6 +4,8 @@ from pydantic import ValidationError
 
 from ai.agents.contracts import AgentPoll, AgentPollOption, FanEngagementDecision
 from ai.agents.loader import load_agent_configurations
+from ai.evaluations.loader import load_evaluation
+from ai.evaluations.provision import ITEM_SCHEMA, build_testing_criteria
 from ai.models.loader import load_model_profiles
 
 
@@ -97,3 +99,25 @@ def test_fan_engagement_poll_threshold_matches_declared_sixty():
             explanation="A visible attacking sequence is developing.",
             poll=poll,
         )
+
+
+def test_evaluation_configuration_has_balanced_six_case_dataset():
+    configuration, cases = load_evaluation()
+
+    assert configuration.model.id == "foundry-multimodal"
+    assert len(cases) == 6
+    assert {category: sum(case.category == category for case in cases) for category in {"routine", "significant", "ambiguous"}} == {
+        "routine": 2,
+        "significant": 2,
+        "ambiguous": 2,
+    }
+    assert sum(case.expected_poll for case in cases) == 2
+
+
+def test_evaluation_definition_uses_grounding_and_poll_criteria():
+    configuration, _ = load_evaluation()
+    criteria = build_testing_criteria(configuration)
+
+    assert ITEM_SCHEMA["additionalProperties"] is False
+    assert [criterion["name"] for criterion in criteria] == ["grounded_observation", "correct_poll_decision"]
+    assert [criterion["type"] for criterion in criteria] == ["label_model", "string_check"]

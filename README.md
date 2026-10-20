@@ -155,7 +155,8 @@ To verify the local integration:
 Foundry model and agent calls are billable. At most one inference runs at a time,
 and only the newest pending window is retained to control cost and lag.
 
-Create or version both agents after their checked-in definitions change:
+Create or version both agents and the Foundry evaluation definition after their
+checked-in definitions change:
 
 ```bash
 source .venv/bin/activate
@@ -171,6 +172,17 @@ Run the real five-frame vision-to-two-agent smoke test with:
 ```bash
 python -m ai.evaluations.pipeline_poc
 ```
+
+Run the six-window Foundry evaluation manually with:
+
+```bash
+python -m ai.evaluations.run
+```
+
+The evaluation measures grounded observation quality, correct poll decisions,
+and end-to-end latency. It appears in the Foundry **Evaluation** screen. The
+**Deploy Foundry solution** GitHub workflow publishes its definition on every
+manual deployment and runs it only when `run_evaluation` is explicitly enabled.
 
 ## Delivery
 
