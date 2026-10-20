@@ -4,9 +4,7 @@ from pydantic import ValidationError
 
 from ai.agents.contracts import AgentPoll, AgentPollOption, FanEngagementDecision
 from ai.agents.loader import load_agent_configurations
-from ai.evaluations.loader import load_evaluation
-from ai.evaluations.provision import ITEM_SCHEMA, build_testing_criteria
-from ai.evaluations.run import write_pipeline_results
+from ai.evaluations.runner import REQUIRED_FIELDS, _criteria, _schema, load_evaluation
 from ai.models.loader import load_model_profiles
 
 
@@ -102,30 +100,25 @@ def test_fan_engagement_poll_threshold_matches_declared_sixty():
         )
 
 
-def test_evaluation_configuration_has_balanced_six_case_dataset():
-    configuration, cases = load_evaluation()
+def test_evaluation_configuration_has_balanced_static_dataset():
+    configuration, cases, digest = load_evaluation()
 
-    assert configuration.model.id == "foundry-multimodal"
+    assert configuration["dataset"] == "dataset.jsonl"
     assert len(cases) == 6
-    assert {category: sum(case.category == category for case in cases) for category in {"routine", "significant", "ambiguous"}} == {
+    assert {category: sum(case["category"] == category for case in cases) for category in {"routine", "significant", "ambiguous"}} == {
         "routine": 2,
         "significant": 2,
         "ambiguous": 2,
     }
-    assert sum(case.expected_poll for case in cases) == 2
+    assert sum(case["expected_poll"] == "true" for case in cases) == 2
+    assert len(digest) == 64
 
 
 def test_evaluation_definition_uses_grounding_and_poll_criteria():
-    configuration, _ = load_evaluation()
-    criteria = build_testing_criteria(configuration)
+    configuration, _, _ = load_evaluation()
+    criteria = _criteria(configuration)
 
-    assert ITEM_SCHEMA["additionalProperties"] is False
+    assert _schema()["additionalProperties"] is False
+    assert set(_schema()["required"]) == REQUIRED_FIELDS
     assert [criterion["name"] for criterion in criteria] == ["grounded_observation", "correct_poll_decision"]
-    assert [criterion["type"] for criterion in criteria] == ["label_model", "string_check"]
-
-
-def test_pipeline_results_are_retained_before_cloud_grading(tmp_path):
-    path = write_pipeline_results(tmp_path, [{"case_id": "routine-midfield-opening", "actual_poll": "false"}])
-
-    assert path.name == "pipeline-results.json"
-    assert '"case_id": "routine-midfield-opening"' in path.read_text()
+    assert [criterion["type"] for criterion in criteria] == ["string_check", "string_check"]

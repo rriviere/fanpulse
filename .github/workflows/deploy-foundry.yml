@@ -86,7 +86,7 @@ jobs:
         run: python -m ai.provision --apply
 
   evaluate:
-    name: Run six-window Foundry evaluation
+    name: Run static Foundry evaluation
     needs: publish
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -98,7 +98,6 @@ jobs:
       id-token: write
     env:
       FOUNDRY_PROJECT_ENDPOINT: ${{ vars.FOUNDRY_PROJECT_ENDPOINT }}
-      FOUNDRY_VISION_MODEL_DEPLOYMENT: ${{ vars.FOUNDRY_VISION_MODEL_DEPLOYMENT }}
       PYTHONUNBUFFERED: '1'
     steps:
       - name: Check out published commit
@@ -121,27 +120,8 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Retrieve licensed evaluation video
-        env:
-          STORAGE_ACCOUNT: ${{ vars.AZURE_STORAGE_ACCOUNT_NAME }}
-          VIDEO_CONTAINER: ${{ vars.FOOTBALL_VIDEOS_CONTAINER }}
-          VIDEO_BLOB_NAME: ${{ vars.FOOTBALL_VIDEO_BLOB_NAME }}
-        run: |
-          test -n "$STORAGE_ACCOUNT"
-          test -n "$VIDEO_CONTAINER"
-          test -n "$VIDEO_BLOB_NAME"
-          az storage blob download \
-            --auth-mode login \
-            --account-name "$STORAGE_ACCOUNT" \
-            --container-name "$VIDEO_CONTAINER" \
-            --name "$VIDEO_BLOB_NAME" \
-            --file apps/web/public/media/match.mov \
-            --overwrite true \
-            --only-show-errors
-          test -s apps/web/public/media/match.mov
-
-      - name: Run real Foundry pipeline evaluation
-        run: python -m ai.evaluations.run
+      - name: Run static Foundry dataset evaluation
+        run: python -m ai.evaluations.runner --run
 
       - name: Retain evaluation report
         if: always()

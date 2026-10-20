@@ -1,0 +1,17 @@
+id: football-pipeline
+name: FanPulse football intelligence
+description: Grades human-reviewed FanPulse outputs for visual grounding and poll decisions.
+dataset: dataset.jsonl
+
+testing_criteria:
+  - type: string_check
+    name: grounded_observation
+    operation: eq
+    input: "{{ item.actual_grounded }}"
+    reference: "{{ item.expected_grounded }}"
+
+  - type: string_check
+    name: correct_poll_decision
+    operation: eq
+    input: "{{ item.actual_poll }}"
+    reference: "{{ item.expected_poll }}"

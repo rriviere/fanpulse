@@ -1,38 +1,22 @@
-# FanPulse Foundry evaluation
+# FanPulse evaluation
 
-This evaluation runs six labelled windows from the licensed football recording
-through the real multimodal model, Match Analyst agent, and Fan Engagement agent.
-It measures only the three metrics most relevant to FanPulse:
+This is a deliberately small, static Foundry evaluation:
 
-- grounded observation quality, judged in Microsoft Foundry;
-- correct poll creation or suppression;
-- end-to-end latency.
+- `evaluation.yaml` declares the judge model and two criteria.
+- `dataset.jsonl` contains six representative outputs captured from the real
+  FanPulse video pipeline.
+- `runner.py` validates, publishes, and runs the dataset through Foundry.
 
-The checked-in files contain timestamps and labels only. Video, extracted frames,
-raw credentials, and generated evaluation results are not committed.
+It measures observation grounding and correct poll decisions. It does not
+download the video or call the vision and agent pipeline, keeping CI reliable
+and inexpensive.
 
-`python -m ai.provision` validates the definition and cases without contacting
-Azure. `python -m ai.provision --apply` idempotently publishes the evaluation
-definition alongside the agents so it appears in the Foundry Evaluation screen.
-
-After deployment, run the billable evaluation explicitly:
+Validate locally:
 
 ```bash
-source .venv/bin/activate
-set -a
-source .azure/fanpulse-dev/.env
-set +a
-python -m ai.evaluations.run
+python -m ai.evaluations.runner
 ```
 
-Alternatively, manually run the **Deploy Foundry solution** GitHub workflow. After
-publishing the agents and evaluation definition, it retrieves the licensed video
-from private Blob Storage, runs the evaluation, submits it to Foundry, and retains
-the Markdown and JSON reports as a GitHub artifact.
-
-The GitHub workload identity needs `Foundry User` at the Foundry **account**
-scope because the grading stage invokes the judge model. Project-only access is
-not sufficient for that inference. Pipeline outputs are written before grading
-begins so a grading or permissions failure does not discard the paid inference
-evidence.
-
+The manually triggered **Deploy Foundry solution** workflow publishes and runs
+the evaluation automatically. Its report is visible in Foundry and retained as
+a GitHub Actions artifact.

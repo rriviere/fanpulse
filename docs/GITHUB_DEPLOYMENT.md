@@ -6,7 +6,7 @@ FanPulse separates validation, application delivery, Foundry configuration, and 
 | --- | --- | --- |
 | `ci.yml` | Test Python, lint/build React, validate Foundry YAML/JSON Schema, compile Bicep | None |
 | `deploy-application.yml` | Build and deploy the combined React/FastAPI package to App Service | OIDC, manual run |
-| `deploy-foundry.yml` | Validate and publish immutable Foundry agent versions and the evaluation definition, then run the billable six-window evaluation | OIDC, manual run |
+| `deploy-foundry.yml` | Validate and publish immutable Foundry agent versions and the evaluation definition, then grade the six-row static dataset | OIDC, manual run |
 | `azd provision` | Create or update resources, model deployment, identities, and RBAC | Explicit local operation |
 
 React and FastAPI share one application workflow because FastAPI serves the built React assets from the same App Service package. They are one deployable unit today; separate frontend and backend workflows would add coordination without providing independent deployment.

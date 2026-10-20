@@ -167,22 +167,18 @@ set +a
 python -m ai.provision --apply
 ```
 
-Run the real five-frame vision-to-two-agent smoke test with:
+Run the six-case static Foundry evaluation manually with:
 
 ```bash
-python -m ai.evaluations.pipeline_poc
+python -m ai.evaluations.runner --run
 ```
 
-Run the six-window Foundry evaluation manually with:
-
-```bash
-python -m ai.evaluations.run
-```
-
-The evaluation measures grounded observation quality, correct poll decisions,
-and end-to-end latency. It appears in the Foundry **Evaluation** screen. The
-**Deploy Foundry solution** GitHub workflow publishes its definition on every
-manual deployment and then runs the six cases automatically.
+The checked-in JSONL dataset contains representative outputs captured from the
+real FanPulse video pipeline. The evaluation measures grounded observation
+quality and correct poll decisions without replaying the video or making vision
+and agent calls. It appears in the Foundry **Evaluation** screen. The **Deploy
+Foundry solution** GitHub workflow publishes its definition and runs the static
+dataset automatically.
 
 ## Delivery
 

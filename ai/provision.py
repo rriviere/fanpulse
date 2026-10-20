@@ -4,8 +4,7 @@ import argparse
 
 from ai.agents.loader import load_agent_configurations
 from ai.agents.provision import provision_agents
-from ai.evaluations.loader import load_evaluation
-from ai.evaluations.provision import provision_evaluation
+from ai.evaluations.runner import load_evaluation, provision_evaluation
 from ai.models.loader import load_model_profiles
 
 
@@ -25,7 +24,7 @@ def main():
     )
     args = parser.parse_args()
 
-    models, agents, (evaluation, cases) = validate_configuration()
+    models, agents, (evaluation, cases, _) = validate_configuration()
     for profile in models.values():
         print(
             f"valid model profile: {profile.id} -> {profile.model_name} {profile.model_version} "
@@ -33,7 +32,7 @@ def main():
         )
     for configuration in agents.values():
         print(f"valid agent: {configuration.id} -> {configuration.resolved_name()}")
-    print(f"valid evaluation: {evaluation.id} -> {evaluation.name} ({len(cases)} cases)")
+    print(f"valid evaluation: {evaluation['id']} -> {evaluation['name']} ({len(cases)} static cases)")
 
     if args.apply:
         for result in provision_agents():
