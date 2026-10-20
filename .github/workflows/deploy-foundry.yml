@@ -2,12 +2,6 @@ name: Deploy Foundry solution
 
 on:
   workflow_dispatch:
-    inputs:
-      run_evaluation:
-        description: Run the billable six-window pipeline evaluation after publishing
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
@@ -94,7 +88,7 @@ jobs:
   evaluate:
     name: Run six-window Foundry evaluation
     needs: publish
-    if: inputs.run_evaluation == true && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment:

@@ -182,7 +182,7 @@ python -m ai.evaluations.run
 The evaluation measures grounded observation quality, correct poll decisions,
 and end-to-end latency. It appears in the Foundry **Evaluation** screen. The
 **Deploy Foundry solution** GitHub workflow publishes its definition on every
-manual deployment and runs it only when `run_evaluation` is explicitly enabled.
+manual deployment and then runs the six cases automatically.
 
 ## Delivery
 

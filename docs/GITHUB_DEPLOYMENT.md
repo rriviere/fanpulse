@@ -6,7 +6,7 @@ FanPulse separates validation, application delivery, Foundry configuration, and 
 | --- | --- | --- |
 | `ci.yml` | Test Python, lint/build React, validate Foundry YAML/JSON Schema, compile Bicep | None |
 | `deploy-application.yml` | Build and deploy the combined React/FastAPI package to App Service | OIDC, manual run |
-| `deploy-foundry.yml` | Validate and publish immutable Foundry agent versions and the evaluation definition; optionally run the billable six-window evaluation | OIDC, manual run |
+| `deploy-foundry.yml` | Validate and publish immutable Foundry agent versions and the evaluation definition, then run the billable six-window evaluation | OIDC, manual run |
 | `azd provision` | Create or update resources, model deployment, identities, and RBAC | Explicit local operation |
 
 React and FastAPI share one application workflow because FastAPI serves the built React assets from the same App Service package. They are one deployable unit today; separate frontend and backend workflows would add coordination without providing independent deployment.
@@ -95,8 +95,8 @@ Web deployment artifacts are retained for 30 days. Rerun a known-good commit's w
 
 Foundry agent versions are immutable. Revert the YAML/schema commit and run the Foundry workflow to publish that configuration as the newest version. Publishing does nothing when the latest version already has the desired configuration hash.
 
-Real Foundry evaluation remains explicit because it uses billable inference. In
-the manually triggered **Deploy Foundry solution** workflow, leave
-`run_evaluation` disabled to publish only the agents and evaluation definition,
-or enable it to run the six licensed video windows and upload the report. It is
-never executed by pull-request validation or application deployment.
+Real Foundry evaluation remains explicit because it uses billable inference. The
+manually triggered **Deploy Foundry solution** workflow publishes the definitions,
+runs the six licensed video windows, submits the results to Foundry, and uploads
+the report. It is never executed by pull-request validation or application
+deployment.

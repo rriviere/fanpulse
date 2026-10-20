@@ -14,4 +14,5 @@ they are not the only copy of the prompts or schemas.
 
 Run `python -m ai.provision` for offline validation, or add `--apply` to publish
 changed agent versions and the Foundry evaluation definition after reviewing the
-diff. Evaluation execution remains a separate manual, billable action.
+diff. The manually triggered Foundry deployment workflow then runs the billable
+six-case evaluation; ordinary CI and application deployment do not run it.

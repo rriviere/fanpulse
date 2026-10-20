@@ -25,8 +25,8 @@ set +a
 python -m ai.evaluations.run
 ```
 
-Alternatively, manually run the **Deploy Foundry solution** GitHub workflow and
-enable its `run_evaluation` input. The workflow retrieves the licensed video from
-private Blob Storage, runs the evaluation, submits it to Foundry, and retains the
-Markdown and JSON reports as a GitHub artifact.
+Alternatively, manually run the **Deploy Foundry solution** GitHub workflow. After
+publishing the agents and evaluation definition, it retrieves the licensed video
+from private Blob Storage, runs the evaluation, submits it to Foundry, and retains
+the Markdown and JSON reports as a GitHub artifact.
 
