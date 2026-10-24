@@ -8,7 +8,7 @@ Built for the **Microsoft × Premier League Inside the Game Hackathon**, FanPuls
 
 > **Live application:** [app-fanpulse-dev-qdifh3qv.azurewebsites.net](https://app-fanpulse-dev-qdifh3qv.azurewebsites.net/)
 >
-> **Hackathon path:** Select **Synthetic** (the default). It uses fictional match data and real Foundry agents. The separate Video mode is an optional technical demonstration and is explicitly excluded from the hackathon submission and judging.
+> **Hackathon path:** Select **Synthetic** (the default). It uses fictional match data and real Foundry agents—the complete experience for judging.
 
 ## What FanPulse does
 
@@ -22,6 +22,8 @@ Football is better when fans can do more than watch. Every attack, recovery and 
 - **Build a richer fan community.** The same platform can bring together casual supporters, tactical thinkers and passionate fans around a common moment without forcing everyone into the same experience.
 
 The hackathon experience brings that vision to life through a continuous 240-second fictional match with all 22 players and the ball in motion. Real Foundry agents interpret its synchronized observations at runtime; the insights and polls are not pre-written answers.
+
+For broadcasters and streaming platforms, FanPulse demonstrates a reusable interaction layer that can turn live match events into audience-specific storytelling without separating fans from the action.
 
 ## Component architecture
 
@@ -61,14 +63,17 @@ flowchart TB
     style Azure fill:#fffde8,stroke:#d8cf80,color:#171329
 ```
 
-### Two ways in. One real AI pipeline.
+### One complete hackathon pipeline
 
-FanPulse can understand a match in two different ways:
+FanPulse implements the five stages in the challenge as one synchronized experience:
 
-1. **Video mode (demonstration only—not part of hackathon judging):** While a video plays, the browser captures a small image once per second. Five images are grouped together and sent securely to the FanPulse backend. Microsoft Foundry examines them and describes what is happening on the pitch.
-2. **Synthetic mode:** No video or images are used. FanPulse reads fictional player movements, ball movements and match events from the synthetic dataset. These are converted into the same structured match description that the video analysis would produce.
-
-Once FanPulse sends the match moment to Foundry, both modes work the same way. The same Match Analyst Agent decides whether the moment matters. If it does, the same Fan Engagement Agent explains it and may create a live poll.
+| Stage | FanPulse implementation |
+| --- | --- |
+| **Ingest** | Read fictional player, ball and event data against a shared live match clock |
+| **Interpret** | Use the Match Analyst Agent to assess significance, context and uncertainty |
+| **Explain** | Use the Fan Engagement Agent to turn meaningful moments into grounded narratives and balanced questions |
+| **Render** | Show insights, evidence and polls beside the animated match at the moment that triggered them |
+| **Personalize** | Adapt each explanation for Casual or Tactical viewers without changing the underlying evidence |
 
 ## How it works
 
@@ -88,8 +93,6 @@ FanPulse uses two persisted Microsoft Foundry agents, each with one clear job:
 | **Fan Engagement** | Observation, assessment and viewer mode | Turn significant moments into audience-friendly insights and, when appropriate, a balanced poll | `FanEngagementDecision` |
 
 Both agents are powered by the keyless `gpt-5-mini` deployment in Microsoft Foundry. Their prompts are version-controlled in [`ai/agents/`](ai/agents/), and JSON Schema keeps their responses predictable for the application.
-
-A six-case Foundry evaluation checks that observations stay grounded in the supplied match evidence and that poll decisions are appropriate. The evaluation is intentionally small and static so it can run reliably without replaying the full video and agent pipeline; details are in [`ai/evaluations/README.md`](ai/evaluations/README.md).
 
 ```mermaid
 sequenceDiagram
@@ -145,7 +148,7 @@ When a poll appears, each viewer can vote once and watch the shared totals updat
 
 ## Synthetic data
 
-FanPulse was originally built to turn video frames into structured match observations. For this hackathon, Synthetic mode replaces only that first step with fictional match data. The same real Foundry agents still interpret every moment at runtime.
+Synthetic mode reads fictional match events directly from the authored dataset and sends their structured observations to the real Foundry agents at runtime.
 
 The judged simulation is stored separately from the application code in [`reference-match.v1.json`](apps/web/public/simulations/reference-match.v1.json). It contains:
 
@@ -167,10 +170,10 @@ The full dataset, animation and timing design is documented in [`docs/SYNTHETIC_
 
 ## Hackathon compliance
 
-- Synthetic mode uses only fictional teams, players, movement and observations.
-- Video mode is visibly marked as a demonstration excluded from judging.
-- No match footage is committed to the repository.
-- AI-generated insights are labelled in the interface.
+- The judged experience uses only fictional teams, players, movement and match observations.
+- The judged experience uses no match footage, real tracking data, club branding or third-party football assets.
+- AI-generated insights are labelled in the interface and grounded in visible event evidence.
+- The public application opens on Synthetic mode and is available to judges without sign-in.
 
 See [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) and the [official rules](https://github.com/microsoft/insidethegamehackathon/blob/main/OFFICIAL%20RULES.md) for the full submission checklist.
 
@@ -180,7 +183,7 @@ See [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) and the [official rules](https://
 | --- | --- | --- |
 | Experience | React, TypeScript, Vite, Motion, SVG | Playback controls, continuous pitch animation, insights, timeline and voting |
 | API | Python, FastAPI, Pydantic | Validation, playback sessions, orchestration, policy and WebSockets |
-| AI | Microsoft Foundry, Foundry prompt agents, `gpt-5-mini` | Vision observation, significance assessment and fan engagement |
+| AI | Microsoft Foundry, Foundry prompt agents, `gpt-5-mini` | Significance assessment, grounded explanation and fan engagement |
 | Data | Azure Cosmos DB for NoSQL | Analysis activity and one-vote-per-viewer poll persistence |
 | Azure | App Service, managed identity, Application Insights | Keyless hosting and monitoring |
 | Delivery | Bicep and GitHub Actions with OIDC | Repeatable infrastructure, testing and deployment |
@@ -188,7 +191,6 @@ See [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) and the [official rules](https://
 ## Further documentation
 
 - [`docs/SYNTHETIC_MATCH.md`](docs/SYNTHETIC_MATCH.md) — match schema, interpolation and synchronization behavior
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — vision path, runtime policy and agent contracts
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — runtime orchestration, publishing policy and agent contracts
 - [`ai/agents/README.md`](ai/agents/README.md) — declarative agent definitions and publication
-- [`ai/evaluations/README.md`](ai/evaluations/README.md) — evaluation dataset and runner
 - [`docs/GITHUB_DEPLOYMENT.md`](docs/GITHUB_DEPLOYMENT.md) — CI/CD, OIDC, delivery and rollback
