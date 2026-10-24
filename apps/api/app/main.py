@@ -10,7 +10,7 @@ from ai.agents.loader import get_agent_configuration
 from ai.agents.provider import FoundryAgentPipeline
 from ai.vision.provider import FoundryVisionProvider
 from .analysis.manager import AnalysisManager
-from .analysis.models import AnalysisWindow, PlaybackState, SubmissionResult
+from .analysis.models import AnalysisWindow, PlaybackState, SubmissionResult, SyntheticObservationSubmission
 from .models import VoteRequest
 from .store import CosmosStore, VoteStore
 
@@ -141,6 +141,13 @@ async def analysis_window(session_id: str, payload: AnalysisWindow):
         return await analysis_manager.submit(session_id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/analysis/sessions/{session_id}/synthetic", response_model=SubmissionResult, status_code=202)
+async def synthetic_observation(session_id: str, payload: SyntheticObservationSubmission):
+    if analysis_manager is None:
+        raise HTTPException(status_code=503, detail="Foundry analysis is not configured")
+    return await analysis_manager.submit_synthetic(session_id, payload)
 
 
 @app.get("/api/polls/{poll_id}/results")

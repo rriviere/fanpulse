@@ -1,4 +1,5 @@
 export type ViewerMode = 'casual' | 'analyst'
+export type SourceMode = 'video' | 'synthetic'
 export type MatchEvent = {id:string;matchSecond:number;videoSecond:number;type:string;title:string;detail:string;candidate?:boolean}
 export type Poll = {id:string;eventId:string;question:string;options:{id:string;label:string}[];significance:number;reason:string;agentTrace:string[];expiresAt:number}
 export type Counts = Record<string,number>

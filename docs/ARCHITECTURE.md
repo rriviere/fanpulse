@@ -105,6 +105,16 @@ staleness and poll policy, persists votes in SQLite, and broadcasts accepted
 results over WebSockets. The checked-in source of truth is `ai/agents/`; Azure
 contains immutable deployed versions created from those definitions.
 
+### Synthetic match input
+
+Synthetic Match Mode adds a deterministic, fictional 240-second SVG replay. Its
+single timeline drives all 22 player positions, the ball, clock, and twelve
+validated `FootballObservation` events. Those observations enter FastAPI after
+the vision boundary, bypassing image inference while retaining playback
+generation checks, duplicate suppression, the Match Analyst, Fan Engagement,
+poll policy, persistence, and WebSocket delivery. Video Mode and its rolling
+five-frame vision path are unchanged.
+
 ## Agent contracts
 
 Each handoff should be a versioned structured object rather than prose-only chat.

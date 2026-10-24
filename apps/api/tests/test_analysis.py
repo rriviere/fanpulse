@@ -7,7 +7,7 @@ from ai.foundry_errors import FoundryRateLimitError
 from ai.vision.models import FootballObservation, VisionBatchResult
 from ai.vision.provider import VisionInference
 from apps.api.app.analysis.manager import AnalysisManager, SessionState
-from apps.api.app.analysis.models import AnalysisWindow, BrowserFrame, PlaybackState
+from apps.api.app.analysis.models import AnalysisWindow, BrowserFrame, PlaybackState, SyntheticObservationSubmission
 
 
 JPEG = b"\xff\xd8\xff\xd9"
@@ -131,6 +131,35 @@ class GatedAnalyst(MockAnalyst):
 
 
 class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_synthetic_observation_bypasses_vision_and_uses_agents(self):
+        messages = []
+
+        async def broadcast(message):
+            messages.append(message)
+
+        vision = MockVision()
+        manager = AnalysisManager(vision, MockAnalyst(), broadcast)
+        await manager.update_state("synthetic", PlaybackState(generation=2, playing=True, position_seconds=31))
+        payload = SyntheticObservationSubmission(
+            generation=2,
+            viewer_mode="analyst",
+            observation=observation(31),
+        )
+        first = await manager.submit_synthetic("synthetic", payload)
+        duplicate = await manager.submit_synthetic("synthetic", payload)
+        await asyncio.sleep(0.02)
+
+        self.assertEqual(first.status, "queued")
+        self.assertEqual(duplicate.reason, "duplicate_window")
+        self.assertEqual(vision.calls, [])
+        self.assertTrue(any(
+            message.get("provider", {}).get("agent") == "synthetic-direct" for message in messages
+        ))
+        self.assertTrue(any(
+            message.get("provider", {}).get("agent") == "mock-agent" for message in messages
+        ))
+        await manager.close()
+
     async def test_rate_limited_window_is_skipped_and_next_window_continues(self):
         messages = []
 

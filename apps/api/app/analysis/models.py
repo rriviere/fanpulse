@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ai.vision.extractor import ExtractedFrame
+from ai.vision.models import FootballObservation
 
 
 class PlaybackState(BaseModel):
@@ -56,6 +57,16 @@ class AnalysisWindow(BaseModel):
         if timestamps[-1] - timestamps[0] > 12:
             raise ValueError("analysis window cannot exceed 12 seconds")
         return frames
+
+
+class SyntheticObservationSubmission(BaseModel):
+    """A deterministic replay event entering the existing agent pipeline after vision."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    generation: int = Field(ge=0)
+    viewer_mode: Literal["casual", "analyst"] = "casual"
+    observation: FootballObservation
 
 
 class SubmissionResult(BaseModel):

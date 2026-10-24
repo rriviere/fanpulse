@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Activity, Bot, ChevronRight, CircleDot, Gauge, Pause, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
-import type { Counts, MatchEvent, Poll, ViewerMode, VisionResultMessage } from './types'
+import type { Counts, MatchEvent, Poll, SourceMode, ViewerMode, VisionResultMessage } from './types'
+import {SyntheticPitch} from './SyntheticPitch'
+import {SYNTHETIC_DURATION,SYNTHETIC_EVENTS} from './syntheticMatch'
 
 const ANALYSIS_INTERVAL_SECONDS=10
 const POLL_SIGNIFICANCE_THRESHOLD=60
@@ -15,6 +17,7 @@ sessionStorage.setItem('fanpulse-analysis-session',analysisSessionId)
 function App(){
   const video=useRef<HTMLVideoElement>(null)
   const [clock,setClock]=useState(0), [playing,setPlaying]=useState(false), [rate,setRate]=useState(1)
+  const [sourceMode,setSourceMode]=useState<SourceMode>('video')
   const [mode,setMode]=useState<ViewerMode>('casual'), [timeline,setTimeline]=useState<MatchEvent[]>([])
   const [poll,setPoll]=useState<Poll|null>(null), [counts,setCounts]=useState<Counts>({}), [voted,setVoted]=useState<string|null>(null)
   const [pollClock,setPollClock]=useState(0)
@@ -23,10 +26,11 @@ function App(){
   const [latestResult,setLatestResult]=useState<VisionResultMessage|null>(null)
   const generation=useRef(0), frameBuffer=useRef<{timestamp_seconds:number;data_url:string}[]>([])
   const nextSampleAt=useRef(0), lastWindowEnd=useRef(-1), lastStateSecond=useRef(-1), pollId=useRef<string|null>(null)
+  const animationFrame=useRef(0), syntheticStartedAt=useRef(0), syntheticStartClock=useRef(0), clockRef=useRef(0), submittedEvents=useRef(new Set<number>())
 
   const applyVisionResult=useCallback((message:VisionResultMessage)=>{
     const id=`vision-${message.generation}-${message.window.end_seconds}`
-    if(message.provider.agent!=='vision-direct'){
+    if(!['vision-direct','synthetic-direct'].includes(message.provider.agent)){
       if(message.insight.publish_insight&&message.insight.significance>=POLL_SIGNIFICANCE_THRESHOLD&&message.insight.poll){
         setPoll({id:`poll-${id}`,eventId:id,question:message.insight.poll.question,options:message.insight.poll.options,significance:message.insight.significance,reason:message.insight.explanation,agentTrace:[`Vision model · ${message.latency.vision_ms}ms`,`Match Analyst · ${message.latency.match_analyst_ms}ms`,`Fan Engagement · ${message.latency.fan_engagement_ms}ms`,'Policy · 60+ significance and dedup passed',`WebSocket · delivered · ${message.latency.total_ms}ms`],expiresAt:Date.now()+POLL_VOTING_SECONDS*1000});setPollClock(Date.now());setVoted(null);setCounts({})
       }
@@ -41,6 +45,7 @@ function App(){
   },[])
 
   useEffect(()=>{pollId.current=poll?.id||null},[poll?.id])
+  useEffect(()=>{clockRef.current=clock},[clock])
   useEffect(()=>{
     if(!poll||voted)return
     const update=()=>{
@@ -100,7 +105,7 @@ function App(){
   },[postPlaybackState])
 
   useEffect(()=>{
-    if(!playing||videoMissing||!video.current)return
+    if(sourceMode!=='video'||!playing||videoMissing||!video.current)return
     const element=video.current,second=Math.floor(clock)
     if(second!==lastStateSecond.current){lastStateSecond.current=second;void postPlaybackState(true,clock)}
     if(clock+.05<nextSampleAt.current)return
@@ -119,7 +124,30 @@ function App(){
         .then(async response=>{if(!response.ok)throw new Error(`frame window rejected (${response.status}): ${await response.text()}`);console.info('[FanPulse] frame window accepted',await response.json())})
         .catch(error=>{console.error('[FanPulse] frame submission error',error);setAnalysisStatus('offline')})
     }
-  },[clock,mode,playing,postPlaybackState,videoMissing])
+  },[clock,mode,playing,postPlaybackState,sourceMode,videoMissing])
+
+  useEffect(()=>{
+    if(sourceMode!=='synthetic'||!playing)return
+    syntheticStartedAt.current=performance.now();syntheticStartClock.current=clockRef.current
+    const tick=(now:number)=>{
+      const next=Math.min(SYNTHETIC_DURATION,syntheticStartClock.current+(now-syntheticStartedAt.current)/1000*rate)
+      setClock(next)
+      const second=Math.floor(next)
+      if(second!==lastStateSecond.current){lastStateSecond.current=second;void postPlaybackState(true,next)}
+      for(const item of SYNTHETIC_EVENTS){
+        if(next>=item.time&&!submittedEvents.current.has(item.time)){
+          submittedEvents.current.add(item.time);setAnalysisStatus('queued')
+          void fetch(`/api/analysis/sessions/${analysisSessionId}/synthetic`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:generation.current,viewer_mode:mode,observation:item.observation})})
+            .then(async response=>{if(!response.ok)throw new Error(`synthetic event rejected (${response.status}): ${await response.text()}`)})
+            .catch(error=>{console.error('[FanPulse] synthetic submission error',error);setAnalysisStatus('offline')})
+        }
+      }
+      if(next>=SYNTHETIC_DURATION){setPlaying(false);void postPlaybackState(false,next);return}
+      animationFrame.current=requestAnimationFrame(tick)
+    }
+    animationFrame.current=requestAnimationFrame(tick)
+    return()=>cancelAnimationFrame(animationFrame.current)
+  },[mode,playing,postPlaybackState,rate,sourceMode])
 
   async function vote(optionId:string){
     if(voted||!poll||Date.now()>=poll.expiresAt){setPoll(null);return}
@@ -133,27 +161,33 @@ function App(){
 
   function reset(){
     video.current?.pause();if(video.current)video.current.currentTime=0
-    setClock(0);setPlaying(false);setTimeline([]);setPoll(null);setLatestResult(null);setVoted(null);setCounts({});resetAnalysis(0,false)
+    submittedEvents.current.clear();setClock(0);setPlaying(false);setTimeline([]);setPoll(null);setLatestResult(null);setVoted(null);setCounts({});resetAnalysis(0,false)
   }
-  function toggle(){if(!videoMissing&&video.current){if(video.current.paused)void video.current.play();else video.current.pause()}}
+  function toggle(){
+    if(sourceMode==='synthetic'){const next=!playing;setPlaying(next);setAnalysisStatus(next?'sampling':'paused');void postPlaybackState(next,clock);return}
+    if(!videoMissing&&video.current){if(video.current.paused)void video.current.play();else video.current.pause()}
+  }
+  function switchSource(next:SourceMode){if(next===sourceMode)return;video.current?.pause();setSourceMode(next);setDuration(next==='synthetic'?SYNTHETIC_DURATION:video.current?.duration||0);reset()}
   const total=Object.values(counts).reduce((sum,count)=>sum+count,0)
   const pollSecondsRemaining=poll?Math.max(0,Math.ceil((poll.expiresAt-pollClock)/1000)):0
   const time=useMemo(()=>`${Math.floor(clock/60).toString().padStart(2,'0')}:${Math.floor(clock%60).toString().padStart(2,'0')}`,[clock])
 
   return <main>
-    <header><div className="brand"><div className="mark"><Sparkles size={17}/></div><div><strong>FANPULSE</strong><span>Your Voice in the Game</span></div></div><div className="header-actions"><span className="live"><i/> AI ACTIVE</span><div className="mode"><button className={mode==='casual'?'active':''} onClick={()=>setMode('casual')}>Casual</button><button className={mode==='analyst'?'active':''} onClick={()=>setMode('analyst')}>Tactical</button></div></div></header>
-    <section className="scorebar"><div className="team"><b style={{background:'#2f9d69'}}>G</b><span>Green kit</span></div><div className="score"><strong>LIVE</strong><span>{time} · VISION-DERIVED OBSERVATIONS</span></div><div className="team away"><span>Dark kit</span><b style={{background:'#252330'}}>D</b></div></section>
+    <header><div className="brand"><div className="mark"><Sparkles size={17}/></div><div><strong>FANPULSE</strong><span>Your Voice in the Game</span></div></div><div className="header-actions"><div className="source-switch"><button className={sourceMode==='video'?'active':''} onClick={()=>switchSource('video')}>Video</button><button className={sourceMode==='synthetic'?'active':''} onClick={()=>switchSource('synthetic')}>Synthetic match</button></div><span className="live"><i/> AI ACTIVE</span><div className="mode"><button className={mode==='casual'?'active':''} onClick={()=>setMode('casual')}>Casual</button><button className={mode==='analyst'?'active':''} onClick={()=>setMode('analyst')}>Tactical</button></div></div></header>
+    <section className="scorebar"><div className="team"><b className="green-crest">G</b><span>Green United</span></div><div className="score"><strong>0 <em>—</em> 0</strong><span>{time} · {sourceMode==='synthetic'?'SYNTHETIC EVENT OBSERVATIONS':'VISION-DERIVED OBSERVATIONS'}</span></div><div className="team away"><span>Black FC</span><b className="black-crest">B</b></div></section>
     <div className="layout">
       <section className="viewer">
         <div className="video-shell">
-          <video ref={video} src="/media/match.mov" playsInline onLoadedMetadata={event=>{setDuration(event.currentTarget.duration);console.info('[FanPulse] video loaded',{duration:event.currentTarget.duration,width:event.currentTarget.videoWidth,height:event.currentTarget.videoHeight})}} onTimeUpdate={event=>setClock(event.currentTarget.currentTime)} onPlay={event=>{console.info('[FanPulse] playback started',{timestamp:event.currentTarget.currentTime});setPlaying(true);setAnalysisStatus('sampling');void postPlaybackState(true,event.currentTarget.currentTime)}} onPause={event=>{console.info('[FanPulse] playback paused',{timestamp:event.currentTarget.currentTime});setPlaying(false);resetAnalysis(event.currentTarget.currentTime,false)}} onSeeked={event=>{console.info('[FanPulse] playback seeked',{timestamp:event.currentTarget.currentTime});resetAnalysis(event.currentTarget.currentTime,!event.currentTarget.paused)}} onError={()=>{console.error('[FanPulse] video could not be loaded');setVideoMissing(true);setAnalysisStatus('video unavailable')}} />
-          {videoMissing&&<div className="placeholder"><div><Radio/><strong>VIDEO UNAVAILABLE</strong><p>Add the licensed recording at <code>apps/web/public/media/match.mov</code>.</p></div></div>}
-          <div className="broadcast-badge"><CircleDot size={13}/> VISION · REAL FRAMES</div>
+          {sourceMode==='video'
+            ?<video ref={video} src="/media/match.mov" playsInline onLoadedMetadata={event=>{setDuration(event.currentTarget.duration);console.info('[FanPulse] video loaded',{duration:event.currentTarget.duration,width:event.currentTarget.videoWidth,height:event.currentTarget.videoHeight})}} onTimeUpdate={event=>setClock(event.currentTarget.currentTime)} onPlay={event=>{setPlaying(true);setAnalysisStatus('sampling');void postPlaybackState(true,event.currentTarget.currentTime)}} onPause={event=>{setPlaying(false);resetAnalysis(event.currentTarget.currentTime,false)}} onSeeked={event=>resetAnalysis(event.currentTarget.currentTime,!event.currentTarget.paused)} onError={()=>{setVideoMissing(true);setAnalysisStatus('video unavailable')}} />
+            :<SyntheticPitch clock={clock}/>}
+          {sourceMode==='video'&&videoMissing&&<div className="placeholder"><div><Radio/><strong>VIDEO UNAVAILABLE</strong><p>Add the licensed recording at <code>apps/web/public/media/match.mov</code>.</p></div></div>}
+          <div className="broadcast-badge"><CircleDot size={13}/> {sourceMode==='synthetic'?'SYNTHETIC · FIXED SEED':'VISION · REAL FRAMES'}</div>
           <AnimatePresence>{poll&&!voted&&<motion.div className="moment-toast" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0}}><Sparkles/><div><span>AI MOMENT DETECTED</span><strong>{poll.significance}% significance</strong></div><ChevronRight/></motion.div>}</AnimatePresence>
-          <div className="controls"><button onClick={toggle} disabled={videoMissing}>{playing?<Pause/>:<Play/>}</button><div className="progress"><input aria-label="Video position" type="range" min="0" max={duration||1} value={clock} disabled={videoMissing} onChange={event=>{const position=+event.target.value;setClock(position);if(video.current)video.current.currentTime=position}}/><span style={{width:`${duration?clock/duration*100:0}%`}}/></div><span>{time}</span><button className="rate" onClick={()=>{const next=rate===4?1:rate*2;setRate(next);if(video.current)video.current.playbackRate=next}}>{rate}×</button></div>
+          <div className="controls"><button onClick={toggle} disabled={sourceMode==='video'&&videoMissing}>{playing?<Pause/>:<Play/>}</button><div className="progress"><input aria-label="Match position" type="range" min="0" max={duration||1} value={clock} disabled={sourceMode==='video'&&videoMissing} onChange={event=>{const position=+event.target.value;setClock(position);clockRef.current=position;syntheticStartClock.current=position;syntheticStartedAt.current=performance.now();submittedEvents.current=new Set(SYNTHETIC_EVENTS.filter(item=>item.time<position).map(item=>item.time));if(video.current)video.current.currentTime=position;resetAnalysis(position,playing)}}/><span style={{width:`${duration?clock/duration*100:0}%`}}/></div><span>{time}</span><button className="rate" onClick={()=>{const next=rate===4?1:rate*2;setRate(next);if(video.current)video.current.playbackRate=next}}>{rate}×</button></div>
         </div>
-        <div className="under-video"><div><button className="primary" onClick={toggle} disabled={videoMissing}>{playing?<><Pause/> Pause video</>:<><Play/> Play with vision</>}</button><button onClick={reset}><RefreshCw/> Reset</button></div></div>
-        <Timeline items={timeline}/>
+        <div className="under-video"><div><button className="primary" onClick={toggle} disabled={sourceMode==='video'&&videoMissing}>{playing?<><Pause/> Pause match</>:<><Play/> {sourceMode==='synthetic'?'Play synthetic match':'Play with vision'}</>}</button><button onClick={reset}><RefreshCw/> Restart</button></div></div>
+        <Timeline items={timeline} sourceMode={sourceMode}/>
       </section>
       <aside>
         <div className="panel-heading"><div><span className="eyebrow"><Bot/> FOUNDRY AGENT TEAM</span><h2>Live intelligence</h2><small className="analysis-meta">{analysisStatus}{analysisLatency!==null?` · ${(analysisLatency/1000).toFixed(1)}s`:''}</small></div><span className={connected?'status connected':'status'}>{connected?'Connected':'Disconnected'}</span></div>
@@ -163,7 +197,7 @@ function App(){
         </div>
       </aside>
     </div>
-    <footer><span><ShieldCheck/> Vision observations are AI-generated from visible frames and may be incomplete.</span><span>REAL VIDEO · REAL FOUNDRY INFERENCE</span></footer>
+    <footer><span><ShieldCheck/> {sourceMode==='synthetic'?'Synthetic events are fictional and deterministic; insights are generated by Foundry agents.':'Vision observations are AI-generated from visible frames and may be incomplete.'}</span><span>{sourceMode==='synthetic'?'SYNTHETIC MATCH · REAL FOUNDRY AGENTS':'REAL VIDEO · REAL FOUNDRY INFERENCE'}</span></footer>
   </main>
 }
 
@@ -171,6 +205,6 @@ function PollCard({poll,counts,total,voted,secondsRemaining,vote}:{poll:Poll;cou
   return <motion.div className="poll-card significant-poll" initial={{opacity:0,y:24,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:10,scale:.98}} transition={{type:'spring',stiffness:260,damping:22}}><div className="poll-glow" aria-hidden="true"/><div className="signal"><span className="signal-icon"><Sparkles/></span><span>SIGNIFICANT MOMENT · FAN VOTE</span></div><div className={voted?'poll-timer voted':'poll-timer'}><span>{voted?'VOTE SUBMITTED':'VOTING CLOSES IN'}</span><strong>{voted?'✓':`${secondsRemaining}s`}</strong></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
 }
 function EmptyState(){return <motion.div className="empty" initial={{opacity:0}} animate={{opacity:1}}><div><Gauge/><i/></div><h3>Watching the match</h3><p>Foundry vision, Match Analyst, and Fan Engagement are looking for grounded, meaningful moments. Routine play is shown with its reason instead of becoming a poll.</p></motion.div>}
-function ObservationCard({result}:{result:VisionResultMessage}){return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className="observation-state published"><Activity/><span>INSIGHT PUBLISHED</span><b className={`confidence-level ${result.observation.confidence}`}>{result.observation.confidence.toUpperCase()} CONFIDENCE</b></div><h3>{result.observation.description}</h3><p>{result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>Vision direct</dd></div></dl></motion.div>}
-function Timeline({items}:{items:MatchEvent[]}){return <section className="timeline"><div className="timeline-title"><span>Match timeline</span><small>VISION OBSERVATIONS</small></div><div className="event-list">{items.length?items.map(event=><motion.div initial={{opacity:0}} animate={{opacity:1}} className="event" key={event.id}><time>{Math.floor(event.matchSecond/60).toString().padStart(2,'0')}:{(event.matchSecond%60).toString().padStart(2,'0')}</time><i className={event.candidate?'hot':''}/><div><strong>{event.title}</strong><span>{event.detail}</span></div></motion.div>):<p className="waiting">Play the video to begin real Foundry analysis.</p>}</div></section>}
+function ObservationCard({result}:{result:VisionResultMessage}){const synthetic=result.provider.agent==='synthetic-direct';return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className="observation-state published"><Activity/><span>INSIGHT PUBLISHED</span><b className={`confidence-level ${result.observation.confidence}`}>{result.observation.confidence.toUpperCase()} CONFIDENCE</b></div><h3>{result.observation.description}</h3><p>{result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>{synthetic?'Synthetic observation adapter':'Vision direct'}</dd></div></dl></motion.div>}
+function Timeline({items,sourceMode}:{items:MatchEvent[];sourceMode:SourceMode}){return <section className="timeline"><div className="timeline-title"><span>Match timeline</span><small>{sourceMode==='synthetic'?'SYNTHETIC EVENT OBSERVATIONS':'VISION OBSERVATIONS'}</small></div><div className="event-list">{items.length?items.map(event=><motion.div initial={{opacity:0}} animate={{opacity:1}} className="event" key={event.id}><time>{Math.floor(event.matchSecond/60).toString().padStart(2,'0')}:{(event.matchSecond%60).toString().padStart(2,'0')}</time><i className={event.candidate?'hot':''}/><div><strong>{event.title}</strong><span>{event.detail}</span></div></motion.div>):<p className="waiting">Play the {sourceMode==='synthetic'?'synthetic match':'video'} to begin Foundry analysis.</p>}</div></section>}
 export default App

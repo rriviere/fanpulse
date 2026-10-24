@@ -8,9 +8,9 @@ from typing import Any, Awaitable, Callable, Protocol
 
 from ai.agents.contracts import AgentInference, MatchAnalystDecision
 from ai.foundry_errors import FoundryRateLimitError
-from ai.vision.models import FootballObservation
+from ai.vision.models import FootballObservation, VisionBatchResult
 from ai.vision.provider import VisionInference
-from apps.api.app.analysis.models import AnalysisWindow, PlaybackState, SubmissionResult
+from apps.api.app.analysis.models import AnalysisWindow, PlaybackState, SubmissionResult, SyntheticObservationSubmission
 
 
 class VisionProvider(Protocol):
@@ -47,7 +47,9 @@ class SessionState:
 @dataclass(frozen=True)
 class AgentWork:
     generation: int
-    window: AnalysisWindow
+    viewer_mode: str
+    start_seconds: float
+    end_seconds: float
     observation: FootballObservation
     vision_result: VisionInference
     started: float
@@ -132,6 +134,49 @@ class AnalysisManager:
         })
         return SubmissionResult(status="replaced" if replaced else "queued")
 
+    async def submit_synthetic(
+        self, session_id: str, submission: SyntheticObservationSubmission
+    ) -> SubmissionResult:
+        state = self.sessions.setdefault(session_id, SessionState())
+        observation = submission.observation
+        timestamp = observation.video_timestamp_seconds
+        if not state.playing or submission.generation != state.generation:
+            return SubmissionResult(status="ignored", reason="stale_or_paused")
+        if timestamp <= state.last_accepted_end:
+            return SubmissionResult(status="ignored", reason="duplicate_window")
+        if abs(state.position_seconds - timestamp) > 15:
+            return SubmissionResult(status="ignored", reason="stale_timeline")
+
+        state.last_accepted_end = timestamp
+        started = monotonic()
+        synthetic_result = VisionInference(
+            result=VisionBatchResult(
+                observations=[observation],
+                limitations=["Deterministic fictional event; multimodal vision intentionally bypassed."],
+            ),
+            latency_ms=0,
+            input_tokens=0,
+            output_tokens=0,
+            model_deployment="synthetic-observation-adapter",
+        )
+        direct_result = AgentInference(
+            decision=self._vision_decision(observation),
+            latency_ms=0,
+            model_deployment="synthetic-observation-adapter",
+            agent_name="synthetic-direct",
+        )
+        await self._deliver_result(
+            session_id, submission.generation, timestamp, timestamp, observation,
+            synthetic_result, direct_result, started,
+        )
+        state.pending_agent = AgentWork(
+            submission.generation, submission.viewer_mode, timestamp, timestamp,
+            observation, synthetic_result, started,
+        )
+        if state.agent_worker is None or state.agent_worker.done():
+            state.agent_worker = asyncio.create_task(self._run_agents(session_id, state))
+        return SubmissionResult(status="queued")
+
     async def _run(self, session_id: str, state: SessionState):
         try:
             while state.pending is not None:
@@ -186,7 +231,9 @@ class AnalysisManager:
                         agent_name="vision-direct",
                     )
                     await self._deliver_result(
-                        session_id, generation, window, observation, vision_result, direct_result, started
+                        session_id, generation, window.frames[0].timestamp_seconds,
+                        window.frames[-1].timestamp_seconds, observation, vision_result,
+                        direct_result, started
                     )
                     logger.info(
                         "fanpulse vision_delivered session=%s generation=%d timestamp=%.3f vision_ms=%d total_ms=%d",
@@ -196,7 +243,10 @@ class AnalysisManager:
                         vision_result.latency_ms,
                         round((monotonic() - started) * 1000),
                     )
-                    state.pending_agent = AgentWork(generation, window, observation, vision_result, started)
+                    state.pending_agent = AgentWork(
+                        generation, window.viewer_mode, window.frames[0].timestamp_seconds,
+                        window.frames[-1].timestamp_seconds, observation, vision_result, started
+                    )
                     if state.agent_worker is None or state.agent_worker.done():
                         state.agent_worker = asyncio.create_task(self._run_agents(session_id, state))
                 except asyncio.CancelledError:
@@ -241,7 +291,7 @@ class AnalysisManager:
                 work = state.pending_agent
                 state.pending_agent = None
                 try:
-                    agent_result = await self.analyst.analyze(work.observation, work.window.viewer_mode)
+                    agent_result = await self.analyst.analyze(work.observation, work.viewer_mode)
                     logger.info(
                         "fanpulse agent_complete session=%s generation=%d duration_ms=%d agent=%s publish=%s poll=%s",
                         session_id,
@@ -252,7 +302,7 @@ class AnalysisManager:
                         agent_result.decision.poll is not None,
                     )
                     if not self._is_current(
-                        state, work.generation, work.window.frames[-1].timestamp_seconds
+                        state, work.generation, work.end_seconds
                     ):
                         logger.info(
                             "fanpulse result_discarded session=%s generation=%d stage=agent reason=stale_playback",
@@ -263,7 +313,8 @@ class AnalysisManager:
                     await self._deliver_result(
                         session_id,
                         work.generation,
-                        work.window,
+                        work.start_seconds,
+                        work.end_seconds,
                         work.observation,
                         work.vision_result,
                         agent_result,
@@ -299,7 +350,8 @@ class AnalysisManager:
         self,
         session_id: str,
         generation: int,
-        window: AnalysisWindow,
+        start_seconds: float,
+        end_seconds: float,
         observation: FootballObservation,
         vision_result: VisionInference,
         agent_result: AgentInference,
@@ -327,8 +379,8 @@ class AnalysisManager:
             "session_id": session_id,
             "generation": generation,
             "window": {
-                "start_seconds": window.frames[0].timestamp_seconds,
-                "end_seconds": window.frames[-1].timestamp_seconds,
+                "start_seconds": start_seconds,
+                "end_seconds": end_seconds,
             },
             "observation": observation.model_dump(mode="json"),
             "insight": decision.model_dump(mode="json"),
@@ -369,7 +421,7 @@ class AnalysisManager:
             "fanpulse analysis_complete session=%s generation=%d timestamp=%.3f vision_ms=%d agent_ms=%d total_ms=%d delivered=true provider=%s",
             session_id,
             generation,
-            window.frames[-1].timestamp_seconds,
+            end_seconds,
             vision_result.latency_ms,
             agent_result.latency_ms,
             total_ms,
