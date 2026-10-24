@@ -156,26 +156,6 @@ FanPulse keeps every insight and poll synchronized with the play that triggered 
 
 The full dataset, animation and timing design is documented in [`docs/SYNTHETIC_MATCH.md`](docs/SYNTHETIC_MATCH.md).
 
-## Trust, safety and cost control
-
-- **Grounded agents:** The agents may use only the supplied match evidence and must state uncertainty.
-- **Structured responses:** JSON Schema validation prevents malformed model output from reaching the interface.
-- **Backend control:** FastAPI—not the model—enforces confidence, significance, cooldown and duplicate-poll rules.
-- **No fake fallback:** If Foundry fails, FanPulse reports the problem instead of inventing an answer.
-- **Controlled usage:** Only one inference runs at a time, keeping cost and load predictable.
-- **Keyless security:** Microsoft Entra ID and managed identities provide Azure access without stored service keys.
-
-## Technology stack
-
-| Layer | Technology | Purpose |
-| --- | --- | --- |
-| Experience | React, TypeScript, Vite, Motion, SVG | Playback controls, continuous pitch animation, insights, timeline and voting |
-| API | Python, FastAPI, Pydantic | Validation, playback sessions, orchestration, policy and WebSockets |
-| AI | Microsoft Foundry, Foundry prompt agents, `gpt-5-mini` | Vision observation, significance assessment and fan engagement |
-| Data | Azure Cosmos DB for NoSQL | Analysis activity and one-vote-per-viewer poll persistence |
-| Azure | App Service, managed identity, Application Insights | Keyless hosting and monitoring |
-| Delivery | Bicep and GitHub Actions with OIDC | Repeatable infrastructure, testing and deployment |
-
 ## Quality, evaluation and delivery
 
 - Automated Python, TypeScript and browser tests cover agent policy, voting, playback, seeking, animation continuity and delayed responses.
@@ -202,6 +182,17 @@ Detailed test, evaluation and deployment instructions are available in [`ai/eval
 - AI-generated insights are labelled in the interface.
 
 See [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) and the [official rules](https://github.com/microsoft/insidethegamehackathon/blob/main/OFFICIAL%20RULES.md) for the full submission checklist.
+
+## Technology stack
+
+| Layer | Technology | Purpose |
+| --- | --- | --- |
+| Experience | React, TypeScript, Vite, Motion, SVG | Playback controls, continuous pitch animation, insights, timeline and voting |
+| API | Python, FastAPI, Pydantic | Validation, playback sessions, orchestration, policy and WebSockets |
+| AI | Microsoft Foundry, Foundry prompt agents, `gpt-5-mini` | Vision observation, significance assessment and fan engagement |
+| Data | Azure Cosmos DB for NoSQL | Analysis activity and one-vote-per-viewer poll persistence |
+| Azure | App Service, managed identity, Application Insights | Keyless hosting and monitoring |
+| Delivery | Bicep and GitHub Actions with OIDC | Repeatable infrastructure, testing and deployment |
 
 ## Further documentation
 
