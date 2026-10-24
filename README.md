@@ -26,6 +26,7 @@ The hackathon experience brings that vision to life through a continuous 240-sec
 ## Component architecture
 
 ```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 14, "rankSpacing": 18, "diagramPadding": 2}, "themeVariables": {"fontSize": "12px"}}}%%
 flowchart TB
     subgraph Client["Client"]
         WEB["React Web Application"]
@@ -35,13 +36,10 @@ flowchart TB
         API["FastAPI Backend"]
     end
 
-    subgraph Foundry["Microsoft Foundry · gpt-5-mini"]
+    subgraph Azure["Azure Managed Services"]
         direction LR
-        ANALYST["Match Analyst Agent"]
-        ENGAGEMENT["Fan Engagement Agent"]
-    end
-
-    subgraph Data["Data Store"]
+        ANALYST["Match Analyst Agent<br/>Microsoft Foundry"]
+        ENGAGEMENT["Fan Engagement Agent<br/>Microsoft Foundry"]
         COSMOS[("Azure Cosmos DB")]
     end
 
@@ -60,8 +58,7 @@ flowchart TB
     class COSMOS database;
     style Client fill:#fffde8,stroke:#d8cf80,color:#171329
     style Application fill:#fffde8,stroke:#d8cf80,color:#171329
-    style Foundry fill:#fffde8,stroke:#d8cf80,color:#171329
-    style Data fill:#fffde8,stroke:#d8cf80,color:#171329
+    style Azure fill:#fffde8,stroke:#d8cf80,color:#171329
 ```
 
 ### Two ways in. One real AI pipeline.
