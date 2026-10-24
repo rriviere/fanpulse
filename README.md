@@ -152,13 +152,7 @@ The judged simulation is stored separately from the application code in [`refere
 - twelve observations synchronized to the visible action; and
 - no real footage, real tracking data or pre-written agent answers.
 
-### Keeping the match and intelligence together
-
-- One clock controls the players, ball, event labels and agent requests.
-- Every request and result carries the event ID, so an insight cannot appear over the wrong play.
-- FanPulse allows only one agent request at a time and spaces requests to protect Foundry from overload.
-- Playback can briefly hold after a key moment so the matching insight and poll remain readable.
-- Seeking or restarting discards results from the previous timeline.
+FanPulse keeps every insight and poll synchronized with the play that triggered it. A shared match clock, event IDs and controlled agent requests prevent stale results, mismatched commentary and unnecessary Foundry load.
 
 The full dataset, animation and timing design is documented in [`docs/SYNTHETIC_MATCH.md`](docs/SYNTHETIC_MATCH.md).
 
