@@ -1,5 +1,7 @@
 # FanPulse
 
+![FanPulse synthetic football simulation with synchronized Foundry intelligence and live fan voting](docs/images/fanpulse-synthetic-match-voting.png)
+
 **Your Voice in the Game.** FanPulse turns a synthetic football match into grounded, timely and personalised intelligence for the people watching it.
 
 Built for the **Microsoft × Premier League Inside the Game Hackathon**, FanPulse combines a continuously animated fictional match, two real Microsoft Foundry agents, evidence-aware publishing policy and live audience voting in one synchronized viewing experience.
@@ -26,36 +28,43 @@ The model is responsible for interpretation and language. It is not responsible 
 
 ```mermaid
 flowchart LR
-    DATA["Fictional match JSON<br/>players, ball, events"]
-    PLAYBACK["Synthetic playback<br/>one authoritative clock"]
-    PITCH["React SVG pitch<br/>continuous animation"]
-    API["FastAPI<br/>validation + orchestration"]
-    ANALYST["Foundry agent<br/>Match Analyst"]
-    ENGAGE["Foundry agent<br/>Fan Engagement"]
-    POLICY["Server policy<br/>evidence, threshold,<br/>cooldown, deduplication"]
-    STORE["Cosmos DB<br/>activity + votes"]
-    WS["WebSocket<br/>insights + vote totals"]
-    UI["Live Intelligence<br/>timeline + poll"]
+    subgraph Inputs["Interchangeable input paths"]
+        VIDEO["Video mode<br/>playback-sampled frames"]
+        WINDOW["Rolling five-frame window<br/>1 compressed JPEG per second"]
+        VIDEO_API["FastAPI /windows<br/>frame validation"]
+        VISION["Direct Foundry multimodal vision<br/>gpt-5-mini"]
+        SYNTH["Synthetic mode<br/>fictional player, ball and event data"]
+        ADAPTER["Deterministic<br/>observation adapter"]
+        SYNTH_API["FastAPI /synthetic<br/>event validation"]
 
-    DATA --> PLAYBACK
-    PLAYBACK --> PITCH
-    PLAYBACK -->|structured observation| API
-    API --> ANALYST
-    ANALYST --> ENGAGE
-    ENGAGE --> POLICY
-    POLICY --> STORE
-    POLICY --> WS
-    STORE --> WS
-    WS --> UI
+        VIDEO --> WINDOW --> VIDEO_API --> VISION
+        SYNTH --> ADAPTER --> SYNTH_API
+    end
+
+    VISION --> OBS["Shared validated<br/>FootballObservation"]
+    SYNTH_API --> OBS
+    OBS --> API["Shared FastAPI<br/>agent orchestration"]
+    API --> ANALYST["Foundry<br/>Match Analyst"]
+    ANALYST --> GATE{"Significant<br/>football moment?"}
+    GATE -->|No| SUPPRESS["Persist evidence<br/>and suppress"]
+    GATE -->|Yes| ENGAGE["Foundry<br/>Fan Engagement"]
+    ENGAGE --> POLICY{"Publish insight?<br/>Poll eligible?"}
+    POLICY --> OUTPUT["Live Intelligence<br/>timeline + voting"]
+    SUPPRESS --> STORE["Cosmos DB<br/>activity + votes"]
+    OUTPUT --> STORE
 ```
 
-The React frontend and FastAPI backend are built into one deployment artifact. FastAPI serves the compiled frontend and exposes the API and WebSocket from the same Azure App Service.
+**Different evidence source. Same contract. Same real agent pipeline.**
+
+FanPulse was originally designed to analyse frames sampled from video playback. Foundry multimodal vision converts each ordered frame window into a validated `FootballObservation`. For the hackathon, Synthetic mode replaces only this upstream vision stage with fictional player movement, ball movement and authored event observations. It does not fabricate images or replay stored AI answers. Both paths produce the same observation contract, after which the same real Foundry Match Analyst, Fan Engagement, publishing policy, synchronization and voting pipeline runs at runtime.
+
+The React frontend and FastAPI backend are built into one deployment artifact. FastAPI serves the compiled frontend and exposes the API and WebSocket from the same Azure App Service. In Video mode, playback-sampled frame bytes travel from the browser to FastAPI and then to Foundry; the browser never calls the model directly.
 
 ## How it works
 
 FanPulse separates deterministic match state from AI interpretation. The browser owns the animation and match clock; FastAPI validates and orchestrates each event; Foundry decides whether the moment matters and how to explain it; Cosmos DB and WebSockets make the resulting interaction durable and shared.
 
-The sequence below follows one synthetic play from movement on the pitch to a personalised insight and audience vote:
+The sequence below follows one synthetic play from movement on the pitch to a personalised insight and audience vote. It intentionally begins with a structured observation because the judged Synthetic path replaces frame capture and vision. The optional Video path and its frame transfer are documented in the **Synthetic data** section below.
 
 ```mermaid
 sequenceDiagram
@@ -65,26 +74,55 @@ sequenceDiagram
     participant API as FastAPI orchestrator
     participant Analyst as Foundry Match Analyst
     participant Engagement as Foundry Fan Engagement
+    participant Model as Foundry gpt-5-mini
     participant DB as Cosmos DB
 
     Match->>UI: Advance continuous player and ball tracks
     UI->>API: Submit event ID, timestamp, observation and viewer mode
     API-->>UI: Broadcast the event evidence
     API->>Analyst: Request grounded significance assessment
-    Analyst-->>API: Return significance, rationale and uncertainty
-    API->>Engagement: Send observation, assessment and viewer mode
-    Engagement-->>API: Return adapted insight and optional poll
-    API->>API: Enforce evidence, threshold, cooldown and deduplication
-    API->>DB: Persist the accepted analysis activity
-    API-->>UI: Broadcast the result for the originating event
-    UI->>API: Submit one vote for this viewer
-    API->>DB: Persist the unique vote
-    API-->>UI: Broadcast updated poll totals
+    Analyst->>Model: Run grounded assessment prompt
+    Model-->>Analyst: Return schema-constrained assessment
+    Analyst-->>API: Return significant flag, score, rationale and uncertainty
+    alt Match Analyst marks the moment significant
+        API->>Engagement: Send observation, assessment and viewer mode
+        Engagement->>Model: Run fan engagement prompt
+        Model-->>Engagement: Return schema-constrained decision
+        Engagement-->>API: Return publish decision, adapted insight and optional poll
+        API->>API: Require source significance and non-low confidence
+        opt Poll proposed and significance score is at least 60
+            API->>API: Enforce 14-second cooldown and duplicate-key policy
+        end
+    else Match Analyst marks the moment routine
+        API->>API: Suppress insight and skip Fan Engagement
+    end
+    API->>DB: Persist the published or suppressed analysis result
+    API-->>UI: Broadcast the event-bound decision and evidence
+    opt An eligible poll was published
+        UI->>API: Submit one vote for this viewer
+        API->>DB: Persist the unique vote
+        API-->>UI: Broadcast updated poll totals
+    end
 ```
 
-At the event timestamp, the browser posts a validated `FootballObservation` to `/api/analysis/sessions/{session_id}/synthetic`. Synthetic mode deliberately enters the pipeline **after** the computer-vision boundary: no rendered animation frames or tracking coordinates are sent to a model. The Match Analyst and Fan Engagement calls are real Foundry agent executions.
+At the event timestamp, the browser posts a validated `FootballObservation` to `/api/analysis/sessions/{session_id}/synthetic`. Synthetic mode deliberately enters the pipeline **after** the computer-vision boundary: no rendered animation frames or tracking coordinates are sent to a model. FastAPI invokes the persisted Match Analyst and Fan Engagement agents, and Foundry runs each agent against the configured `gpt-5-mini` deployment.
+
+There is no additional direct `gpt-5-mini` call in the Synthetic path. The direct multimodal model call belongs to the optional Video path, where FastAPI sends an ordered frame window to the Foundry Responses API to produce the shared observation before invoking the same two agents.
 
 There are no hard-coded agent answers, polls or fallback insights. If Foundry is unavailable, the UI reports the failure instead of fabricating a result.
+
+### Significance and publishing decisions
+
+Significance is not inferred from the animation by the browser. It passes through explicit model and server-side gates:
+
+| Decision | Owner | Effect |
+| --- | --- | --- |
+| Is the source event potentially meaningful? | Validated `FootballObservation` | `is_significant=false` or `confidence=low` forces suppression, regardless of later agent output. |
+| Is the moment meaningful in football terms? | Foundry Match Analyst | Returns a `significant` boolean, a 0–100 score, rationale and uncertainty. A routine result stops the pipeline before Fan Engagement, saving a second model call. |
+| Should an insight be shown? | Foundry Fan Engagement + FastAPI policy | Fan Engagement returns `publish_insight`; FastAPI re-applies the source-evidence and confidence gates before publishing. |
+| Should viewers be asked to vote? | Fan Engagement + deterministic FastAPI policy | A poll is eligible only for a published insight with significance **60 or higher**, then must also pass the 14-second cooldown and duplicate-key checks. |
+
+The model explains why a moment matters, while deterministic backend policy retains final control over what is published and whether a poll can open.
 
 ### The five-stage hackathon pipeline
 
@@ -111,7 +149,9 @@ The provisioning process hashes the resolved YAML definition and JSON Schema. It
 
 ## Synthetic data
 
-FanPulse was originally designed to analyse video. In that path, the browser captures an ordered window of frames from the current playback position and sends it to FastAPI. A multimodal model in Microsoft Foundry examines those frames and returns a structured `FootballObservation` describing only what it can see: the event type, team in possession, field zone, description, evidence, confidence and whether the moment appears significant.
+FanPulse was originally designed to analyse video. In that path, the browser captures one compressed JPEG frame per video second and builds a rolling window of five ordered frames from the current playback position. It submits that window, including each frame's video timestamp and playback generation, to `/api/analysis/sessions/{session_id}/windows`. FastAPI validates the payload and sends the frame content directly to the configured multimodal `gpt-5-mini` deployment in Microsoft Foundry. The model returns a schema-constrained `FootballObservation` describing only what it can see: the event type, team in possession, field zone, description, evidence, confidence and whether the moment appears significant.
+
+Frames are transient inference input. FanPulse does not persist them in Cosmos DB; it stores the structured analysis activity and votes. FastAPI allows only one vision inference at a time, keeps only the newest pending window for each playback session, and discards a result if playback has moved more than 15 video seconds beyond it.
 
 The rest of FanPulse was deliberately designed not to depend on video. It depends on that validated observation contract.
 
@@ -120,7 +160,7 @@ For the hackathon, the video and vision stage is replaced by a fictional synthet
 ```mermaid
 flowchart LR
     subgraph Video["Optional video proof of concept"]
-        Frames["Ordered video frames"] --> Vision["Foundry multimodal vision"]
+        Frames["Ordered video frames"] --> Vision["Direct Foundry gpt-5-mini<br/>multimodal vision call"]
         Vision --> VideoObservation["Validated FootballObservation"]
     end
 
