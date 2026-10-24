@@ -89,6 +89,8 @@ FanPulse uses two persisted Microsoft Foundry agents, each with one clear job:
 
 Both agents are powered by the keyless `gpt-5-mini` deployment in Microsoft Foundry. Their prompts are version-controlled in [`ai/agents/`](ai/agents/), and JSON Schema keeps their responses predictable for the application.
 
+A six-case Foundry evaluation checks that observations stay grounded in the supplied match evidence and that poll decisions are appropriate. The evaluation is intentionally small and static so it can run reliably without replaying the full video and agent pipeline; details are in [`ai/evaluations/README.md`](ai/evaluations/README.md).
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -155,17 +157,6 @@ The judged simulation is stored separately from the application code in [`refere
 FanPulse keeps every insight and poll synchronized with the play that triggered it. A shared match clock, event IDs and controlled agent requests prevent stale results, mismatched commentary and unnecessary Foundry load.
 
 The full dataset, animation and timing design is documented in [`docs/SYNTHETIC_MATCH.md`](docs/SYNTHETIC_MATCH.md).
-
-## Quality, evaluation and delivery
-
-- Automated Python, TypeScript and browser tests cover agent policy, voting, playback, seeking, animation continuity and delayed responses.
-- The complete synthetic match is checked at 60 frames per second for unrealistic player or ball jumps.
-- A version-controlled six-case Foundry evaluation measures grounded observations and correct poll decisions.
-- A capped smoke test verifies the first two synthetic moments against the real deployed Foundry agents.
-- GitHub Actions validates every change. Application deployment and Foundry-agent publication remain separate, so only changed components are released.
-- Bicep, Microsoft Entra ID and GitHub OIDC provide repeatable Azure infrastructure without stored deployment secrets.
-
-Detailed test, evaluation and deployment instructions are available in [`ai/evaluations/README.md`](ai/evaluations/README.md) and [`docs/GITHUB_DEPLOYMENT.md`](docs/GITHUB_DEPLOYMENT.md).
 
 ## Honest boundaries
 
