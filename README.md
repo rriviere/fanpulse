@@ -12,17 +12,16 @@ Built for the **Microsoft × Premier League Inside the Game Hackathon**, FanPuls
 
 ## What FanPulse does
 
-Traditional broadcasts give every viewer the same commentary. FanPulse treats a match moment as a piece of evidence that can be interpreted and presented differently without changing the underlying facts.
+Football is better when fans can do more than watch. Every attack, recovery and tactical change creates an opinion: *Was that move dangerous? Should the team press higher? What should happen next?* FanPulse turns those moments into a shared, interactive conversation alongside the match.
 
-- A deterministic 240-second fictional match animates all 22 players and the ball.
-- Twelve authored observations are synchronized to the action visible on the pitch.
-- The **Match Analyst** decides whether a moment is meaningful and explains why.
-- The **Fan Engagement** agent converts significant moments into concise viewer-facing copy and, when justified, a balanced poll.
-- Casual and tactical modes present the same grounded event at different levels of detail.
-- Poll votes are persisted and broadcast to connected viewers in real time.
-- Every result remains bound to its originating event and playback generation, preventing an old insight from appearing over a new play.
+- **Understand the moment.** The Foundry Match Analyst Agent identifies meaningful play and explains why it matters while the action is still relevant.
+- **See the match your way.** Casual mode makes the story immediately accessible; Tactical mode gives detail-hungry viewers deeper football context.
+- **Have your say.** The Foundry Fan Engagement Agent turns significant moments into timely, balanced questions that invite viewers into the experience.
+- **Compare your view with the crowd.** Fans vote live and see the shared response update, revealing whether others read the game the same way.
+- **Stay connected to the action.** Every insight and vote remains synchronized with the exact play that inspired it, instead of becoming a disconnected second-screen discussion.
+- **Build a richer fan community.** The same platform can bring together casual supporters, tactical thinkers and passionate fans around a common moment without forcing everyone into the same experience.
 
-The model is responsible for interpretation and language. It is not responsible for the match clock, player positions, ball positions, scores, vote totals or event identity.
+The hackathon experience brings that vision to life through a continuous 240-second fictional match with all 22 players and the ball in motion. Real Foundry agents interpret its synchronized observations at runtime; the insights and polls are not pre-written answers.
 
 ## End-to-end architecture
 
