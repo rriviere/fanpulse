@@ -44,10 +44,10 @@ flowchart LR
     VISION --> OBS["Shared validated<br/>FootballObservation"]
     SYNTH_API --> OBS
     OBS --> API["Shared FastAPI<br/>agent orchestration"]
-    API --> ANALYST["Foundry<br/>Match Analyst"]
+    API --> ANALYST["Foundry Match Analyst<br/>Agent"]
     ANALYST --> GATE{"Significant<br/>football moment?"}
     GATE -->|No| SUPPRESS["Persist evidence<br/>and suppress"]
-    GATE -->|Yes| ENGAGE["Foundry<br/>Fan Engagement"]
+    GATE -->|Yes| ENGAGE["Foundry Fan Engagement<br/>Agent"]
     ENGAGE --> POLICY{"Publish insight?<br/>Poll eligible?"}
     POLICY --> OUTPUT["Live Intelligence<br/>timeline + voting"]
     SUPPRESS --> STORE["Cosmos DB<br/>activity + votes"]
@@ -56,7 +56,7 @@ flowchart LR
 
 **Different evidence source. Same contract. Same real agent pipeline.**
 
-FanPulse was originally designed to analyse frames sampled from video playback. Foundry multimodal vision converts each ordered frame window into a validated `FootballObservation`. For the hackathon, Synthetic mode replaces only this upstream vision stage with fictional player movement, ball movement and authored event observations. It does not fabricate images or replay stored AI answers. Both paths produce the same observation contract, after which the same real Foundry Match Analyst, Fan Engagement, publishing policy, synchronization and voting pipeline runs at runtime.
+FanPulse was originally designed to analyse frames sampled from video playback. Foundry multimodal vision converts each ordered frame window into a validated `FootballObservation`. For the hackathon, Synthetic mode replaces only this upstream vision stage with fictional player movement, ball movement and authored event observations. It does not fabricate images or replay stored AI answers. Both paths produce the same observation contract, after which the same real Foundry Match Analyst Agent, Foundry Fan Engagement Agent, publishing policy, synchronization and voting pipeline runs at runtime.
 
 The React frontend and FastAPI backend are built into one deployment artifact. FastAPI serves the compiled frontend and exposes the API and WebSocket from the same Azure App Service. In Video mode, playback-sampled frame bytes travel from the browser to FastAPI and then to Foundry; the browser never calls the model directly.
 
@@ -72,8 +72,8 @@ sequenceDiagram
     participant Match as Synthetic match
     participant UI as React experience
     participant API as FastAPI orchestrator
-    participant Analyst as Foundry Match Analyst
-    participant Engagement as Foundry Fan Engagement
+    participant Analyst as Foundry Match Analyst Agent
+    participant Engagement as Foundry Fan Engagement Agent
     participant Model as Foundry gpt-5-mini
     participant DB as Cosmos DB
 
@@ -118,9 +118,9 @@ Significance is not inferred from the animation by the browser. It passes throug
 | Decision | Owner | Effect |
 | --- | --- | --- |
 | Is the source event potentially meaningful? | Validated `FootballObservation` | `is_significant=false` or `confidence=low` forces suppression, regardless of later agent output. |
-| Is the moment meaningful in football terms? | Foundry Match Analyst | Returns a `significant` boolean, a 0–100 score, rationale and uncertainty. A routine result stops the pipeline before Fan Engagement, saving a second model call. |
-| Should an insight be shown? | Foundry Fan Engagement + FastAPI policy | Fan Engagement returns `publish_insight`; FastAPI re-applies the source-evidence and confidence gates before publishing. |
-| Should viewers be asked to vote? | Fan Engagement + deterministic FastAPI policy | A poll is eligible only for a published insight with significance **60 or higher**, then must also pass the 14-second cooldown and duplicate-key checks. |
+| Is the moment meaningful in football terms? | Foundry Match Analyst Agent | Returns a `significant` boolean, a 0–100 score, rationale and uncertainty. A routine result stops the pipeline before Fan Engagement, saving a second model call. |
+| Should an insight be shown? | Foundry Fan Engagement Agent + FastAPI policy | Fan Engagement returns `publish_insight`; FastAPI re-applies the source-evidence and confidence gates before publishing. |
+| Should viewers be asked to vote? | Foundry Fan Engagement Agent + deterministic FastAPI policy | A poll is eligible only for a published insight with significance **60 or higher**, then must also pass the 14-second cooldown and duplicate-key checks. |
 
 The model explains why a moment matters, while deterministic backend policy retains final control over what is published and whether a poll can open.
 
@@ -171,8 +171,8 @@ flowchart LR
 
     VideoObservation --> Contract["Shared observation contract"]
     SyntheticObservation --> Contract
-    Contract --> Analyst["Foundry Match Analyst"]
-    Analyst --> Engagement["Foundry Fan Engagement"]
+    Contract --> Analyst["Foundry Match Analyst Agent"]
+    Analyst --> Engagement["Foundry Fan Engagement Agent"]
     Engagement --> Policy["Shared policy and synchronization"]
     Policy --> Experience["Insights, timeline and live voting"]
 ```
@@ -184,7 +184,7 @@ This means synthetic mode is not a recording of pre-generated Foundry answers. O
 | Source | Ordered JPEG frames captured from playback | Fictional player, ball and event data |
 | Observation producer | Foundry multimodal vision | Deterministic synthetic adapter |
 | Shared contract | `FootballObservation` | `FootballObservation` |
-| Match interpretation | Real Foundry Match Analyst | Same real Foundry Match Analyst |
+| Match interpretation | Real Foundry Match Analyst Agent | Same real Foundry Match Analyst Agent |
 | Fan presentation | Real Foundry Fan Engagement agent | Same real Foundry Fan Engagement agent |
 | Delivery | Same validation, policy, WebSocket and timeline | Same validation, policy, WebSocket and timeline |
 | Voting | Same durable vote service | Same durable vote service |
@@ -255,7 +255,7 @@ flowchart LR
     VIDEO["Licensed local video"] --> CAPTURE["Browser capture<br/>1 JPEG / second"]
     CAPTURE --> WINDOW["Rolling ordered<br/>5-frame window"]
     WINDOW --> VISION["Foundry multimodal vision<br/>structured observation"]
-    VISION --> AGENTS["Same Match Analyst<br/>and Fan Engagement agents"]
+    VISION --> AGENTS["Same Foundry Match Analyst<br/>and Fan Engagement Agents"]
     AGENTS --> UI["Same policy, WebSocket,<br/>timeline and voting UI"]
 ```
 
