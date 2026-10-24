@@ -62,7 +62,7 @@ FanPulse can understand a match in two different ways:
 
 From that point onward, both modes work in exactly the same way. The same real Foundry Match Analyst Agent decides whether the moment matters. If it does, the same real Foundry Fan Engagement Agent explains it to the viewer and may create a live poll.
 
-Synthetic mode does not replay stored AI answers. The match data is fictional, but the agent analysis, insights and polls are generated at runtime.
+Synthetic mode uses fictional match events as its input, while the Foundry agents interpret each moment and generate fresh insights and polls during playback.
 
 The React application controls what the viewer sees. FastAPI acts as the secure middle layer between the browser, Microsoft Foundry and Cosmos DB. The browser never contacts the AI model directly.
 
