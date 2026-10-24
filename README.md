@@ -28,7 +28,7 @@ The hackathon experience brings that vision to life through a continuous 240-sec
 ```mermaid
 flowchart LR
     subgraph Inputs["Interchangeable input paths"]
-        VIDEO["Video mode<br/>playback-sampled frames"]
+        VIDEO["Video mode<br/>demo only — not judged"]
         WINDOW["Rolling five-frame window<br/>1 compressed JPEG per second"]
         VIDEO_API["FastAPI /windows<br/>frame validation"]
         VISION["Direct Foundry multimodal vision<br/>gpt-5-mini"]
@@ -53,11 +53,20 @@ flowchart LR
     OUTPUT --> STORE
 ```
 
-**Different evidence source. Same contract. Same real agent pipeline.**
+### Two ways in. One real AI pipeline.
 
-FanPulse was originally designed to analyse frames sampled from video playback. Foundry multimodal vision converts each ordered frame window into a validated `FootballObservation`. For the hackathon, Synthetic mode replaces only this upstream vision stage with fictional player movement, ball movement and authored event observations. It does not fabricate images or replay stored AI answers. Both paths produce the same observation contract, after which the same real Foundry Match Analyst Agent, Foundry Fan Engagement Agent, publishing policy, synchronization and voting pipeline runs at runtime.
+FanPulse can understand a match in two different ways:
 
-The React frontend and FastAPI backend are built into one deployment artifact. FastAPI serves the compiled frontend and exposes the API and WebSocket from the same Azure App Service. In Video mode, playback-sampled frame bytes travel from the browser to FastAPI and then to Foundry; the browser never calls the model directly.
+1. **Video mode (demonstration only—not part of hackathon judging):** While a video plays, the browser captures a small image once per second. Five images are grouped together and sent securely to the FanPulse backend. Microsoft Foundry examines them and describes what is happening on the pitch.
+2. **Synthetic mode:** No video or images are used. FanPulse reads fictional player movements, ball movements and match events from the synthetic dataset. These are converted into the same structured match description that the video analysis would produce.
+
+From that point onward, both modes work in exactly the same way. The same real Foundry Match Analyst Agent decides whether the moment matters. If it does, the same real Foundry Fan Engagement Agent explains it to the viewer and may create a live poll.
+
+Synthetic mode does not replay stored AI answers. The match data is fictional, but the agent analysis, insights and polls are generated at runtime.
+
+The React application controls what the viewer sees. FastAPI acts as the secure middle layer between the browser, Microsoft Foundry and Cosmos DB. The browser never contacts the AI model directly.
+
+> **Video provides images. Synthetic mode provides fictional events. Both become the same match observation and enter the same real Foundry agent pipeline.**
 
 ## How it works
 
