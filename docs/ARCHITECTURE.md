@@ -107,9 +107,13 @@ contains immutable deployed versions created from those definitions.
 
 ### Synthetic match input
 
-Synthetic Match Mode adds a deterministic, fictional 240-second SVG replay. Its
-single timeline drives all 22 player positions, the ball, clock, and twelve
-validated `FootballObservation` events. Those observations enter FastAPI after
+Synthetic Match Mode adds a deterministic, fictional 135-second SVG replay. Its
+single timeline drives all 22 player positions, the ball, clock, and nine
+validated `FootballObservation` events. The selected event types and ordering
+mirror a persisted vision-analysis run from the licensed demo, while player
+positions and identities remain fictional rather than traced from footage. Events
+are spaced fifteen seconds apart so the existing single-flight Foundry agent
+pipeline can normally complete before the next submission. Those observations enter FastAPI after
 the vision boundary, bypassing image inference while retaining playback
 generation checks, duplicate suppression, the Match Analyst, Fan Engagement,
 poll policy, persistence, and WebSocket delivery. Video Mode and its rolling
