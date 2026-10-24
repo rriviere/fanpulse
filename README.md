@@ -26,45 +26,31 @@ The hackathon experience brings that vision to life through a continuous 240-sec
 ## Component architecture
 
 ```mermaid
-flowchart LR
-    subgraph Sources["Match input sources"]
-        VIDEO["Video Playback<br/>demo only — not judged"]
-        SYNTH["Synthetic Match Data<br/>judged experience"]
+flowchart TB
+    WEB["<b>FanPulse Web Application</b><br/><br/>Container: React + TypeScript<br/><br/>Displays the synthetic match, Live Intelligence,<br/>personalised viewing modes and fan voting"]
+
+    subgraph Application["FanPulse API Application"]
+        API["<b>FanPulse API</b><br/><br/>Container: Python + FastAPI<br/><br/>Validates match observations, orchestrates agents,<br/>applies publishing policy and streams live updates"]
     end
 
-    subgraph Adapters["Input adapters"]
-        VISION["Video Observation Adapter<br/>FastAPI + Foundry Vision"]
-        SIM["Synthetic Observation Adapter<br/>React + FastAPI"]
+    subgraph Azure["Azure Managed Services"]
+        direction LR
+        FOUNDRY["<b>Foundry Agent Pipeline</b><br/><br/>Service: Microsoft Foundry + gpt-5-mini<br/><br/>Match Analyst Agent assesses significance;<br/>Fan Engagement Agent creates insights and polls"]
+        COSMOS["<b>FanPulse Activity Store</b><br/><br/>Service: Azure Cosmos DB for NoSQL<br/><br/>Persists structured analysis activity,<br/>poll votes and live vote totals"]
     end
 
-    CONTRACT["Shared FootballObservation<br/>Contract"]
+    WEB -->|"Makes API calls to<br/>observations, playback state and votes"| API
+    API -->|"Publishes WebSocket updates to<br/>insights, polls and vote totals"| WEB
+    API -->|"Runs grounded agent workflow"| FOUNDRY
+    FOUNDRY -->|"Returns structured decisions"| API
+    API -->|"Stores and retrieves activity and votes"| COSMOS
 
-    subgraph Agents["Microsoft Foundry agent pipeline — gpt-5-mini"]
-        ANALYST["Match Analyst Agent"]
-        ENGAGE["Fan Engagement Agent"]
-    end
-
-    subgraph Platform["FanPulse platform services"]
-        API["FastAPI Orchestration<br/>Validation + Publishing Policy"]
-        STORE["Cosmos DB<br/>Analysis Activity + Votes"]
-        WS["WebSocket<br/>Live Updates"]
-    end
-
-    UI["React Fan Experience<br/>Live Intelligence + Timeline + Voting"]
-
-    VIDEO --> VISION
-    SYNTH --> SIM
-    VISION --> CONTRACT
-    SIM --> CONTRACT
-    CONTRACT --> API
-    API --> ANALYST
-    ANALYST -->|assessment| API
-    API -->|significant moments only| ENGAGE
-    ENGAGE -->|insight + optional poll| API
-    API <--> STORE
-    API --> WS
-    WS --> UI
-    UI -->|viewer mode + votes| API
+    classDef container fill:#1769c2,stroke:#0b3f78,color:#fff,stroke-width:2px;
+    classDef component fill:#4799e8,stroke:#1769c2,color:#fff,stroke-width:2px;
+    class WEB container;
+    class API,FOUNDRY,COSMOS component;
+    style Application fill:#303238,stroke:#5b5e66,color:#fff,stroke-width:2px
+    style Azure fill:#303238,stroke:#5b5e66,color:#fff,stroke-width:2px
 ```
 
 ### Two ways in. One real AI pipeline.
