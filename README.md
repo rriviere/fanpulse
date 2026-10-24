@@ -135,16 +135,6 @@ sequenceDiagram
 - A poll appears only when the score is at least 60 and the backend confirms it is timely and not a duplicate.
 - If Foundry is unavailable, FanPulse reports the problem instead of displaying a made-up answer.
 
-### The five-stage hackathon pipeline
-
-| Stage | FanPulse implementation |
-| --- | --- |
-| **1. Ingest** | Load a versioned fictional match containing player tracks, ball tracks and timestamped football observations. |
-| **2. Interpret** | Send the current structured observation to the Foundry Match Analyst for a grounded significance assessment. |
-| **3. Explain** | Pass the observation and assessment to the Fan Engagement agent, which produces concise copy and an optional poll. |
-| **4. Render** | Deliver the result over WebSocket and render it beside the matching action, with evidence and uncertainty visible. |
-| **5. Personalise** | Use the selected Casual or Tactical mode to control the language and depth of the generated explanation. |
-
 ## Synthetic data
 
 FanPulse was originally designed to analyse video. In that path, the browser captures one compressed JPEG frame per video second and builds a rolling window of five ordered frames from the current playback position. It submits that window, including each frame's video timestamp and playback generation, to `/api/analysis/sessions/{session_id}/windows`. FastAPI validates the payload and sends the frame content directly to the configured multimodal `gpt-5-mini` deployment in Microsoft Foundry. The model returns a schema-constrained `FootballObservation` describing only what it can see: the event type, team in possession, field zone, description, evidence, confidence and whether the moment appears significant.
