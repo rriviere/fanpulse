@@ -56,9 +56,19 @@ jobs:
         working-directory: apps/web
         run: npm run lint
 
+      - name: Test synthetic motion and playback synchronization
+        working-directory: apps/web
+        run: npm test
+
       - name: Build web application
         working-directory: apps/web
         run: npm run build
+
+      - name: Test synthetic playback in Chromium without calling Foundry
+        working-directory: apps/web
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser
 
       - name: Build Bicep template
         run: az bicep build --file infra/main.bicep --stdout >/dev/null

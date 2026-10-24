@@ -3,7 +3,8 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Activity, Bot, ChevronRight, CircleDot, Gauge, Pause, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import type { Counts, MatchEvent, Poll, SourceMode, ViewerMode, VisionResultMessage } from './types'
 import {SyntheticPitch} from './SyntheticPitch'
-import {eventAt,SYNTHETIC_AGENT_TIMEOUT_MS,SYNTHETIC_DURATION,SYNTHETIC_EVENTS,SYNTHETIC_RESULT_HOLD_MS} from './syntheticMatch'
+import {eventAt,loadSyntheticMatch, type SyntheticMatch} from './syntheticMatch'
+import {SyntheticPlayback} from './syntheticPlayback'
 
 const ANALYSIS_INTERVAL_SECONDS=10
 const POLL_SIGNIFICANCE_THRESHOLD=60
@@ -13,7 +14,7 @@ const viewerId=localStorage.getItem('fanpulse-viewer-id') || crypto.randomUUID()
 localStorage.setItem('fanpulse-viewer-id',viewerId)
 const analysisSessionId=sessionStorage.getItem('fanpulse-analysis-session') || crypto.randomUUID()
 sessionStorage.setItem('fanpulse-analysis-session',analysisSessionId)
-type SyntheticSync={eventId:string;eventLabel:string;eventTime:number;submittedAt:number;resultAt:number|null;released:boolean}
+const debugSynthetic=new URLSearchParams(location.search).has('debugSynthetic')
 
 function App(){
   const video=useRef<HTMLVideoElement>(null)
@@ -25,20 +26,35 @@ function App(){
   const [connected,setConnected]=useState(false), [videoMissing,setVideoMissing]=useState(false), [duration,setDuration]=useState(0)
   const [analysisStatus,setAnalysisStatus]=useState('paused'), [analysisLatency,setAnalysisLatency]=useState<number|null>(null)
   const [latestResult,setLatestResult]=useState<VisionResultMessage|null>(null)
+  const [syntheticMatch,setSyntheticMatch]=useState<SyntheticMatch|null>(null), [syntheticError,setSyntheticError]=useState<string|null>(null)
+  const [syntheticHold,setSyntheticHold]=useState<string|null>(null)
+  const [syntheticDiagnostics,setSyntheticDiagnostics]=useState<Record<string,unknown>>({})
   const generation=useRef(0), frameBuffer=useRef<{timestamp_seconds:number;data_url:string}[]>([])
   const nextSampleAt=useRef(0), lastWindowEnd=useRef(-1), lastStateSecond=useRef(-1), pollId=useRef<string|null>(null)
-  const animationFrame=useRef(0), syntheticStartedAt=useRef(0), syntheticStartClock=useRef(0), clockRef=useRef(0), submittedEvents=useRef(new Set<string>()), syntheticSync=useRef<SyntheticSync|null>(null)
+  const animationFrame=useRef(0), syntheticPlayback=useRef<SyntheticPlayback|null>(null), displayedSyntheticEvent=useRef<string|null>(null)
+  const playbackStateChain=useRef<Promise<boolean>>(Promise.resolve(true))
+
+  useEffect(()=>{
+    const controller=new AbortController()
+    void loadSyntheticMatch(controller.signal).then(match=>{
+      syntheticPlayback.current=new SyntheticPlayback(match)
+      setSyntheticMatch(match)
+    }).catch(error=>{
+      if(!controller.signal.aborted)setSyntheticError(error instanceof Error?error.message:'Match data could not be loaded')
+    })
+    return()=>controller.abort()
+  },[])
 
   const applyVisionResult=useCallback((message:VisionResultMessage)=>{
     const syntheticEvent=message.synthetic_event??null
-    if(syntheticEvent&&syntheticSync.current?.eventId!==syntheticEvent.id){
-      console.info('[FanPulse] synthetic result discarded',{event:syntheticEvent.id,active:syntheticSync.current?.eventId})
+    if(syntheticEvent&&!syntheticPlayback.current?.isCurrent(syntheticEvent.id,message.generation)){
+      console.info('[FanPulse] synthetic result discarded',{event:syntheticEvent.id})
       return
     }
     const id=syntheticEvent?`synthetic-${message.generation}-${syntheticEvent.id}`:`vision-${message.generation}-${message.window.end_seconds}`
     if(!['vision-direct','synthetic-direct'].includes(message.provider.agent)){
       if(syntheticEvent){
-        if(syntheticSync.current&&!syntheticSync.current.resultAt)syntheticSync.current.resultAt=performance.now()
+        syntheticPlayback.current?.receiveResult(syntheticEvent.id,message.generation,performance.now())
         setLatestResult(message);setAnalysisLatency(message.latency.total_ms);setAnalysisStatus('published')
         if(message.insight.publish_insight){
           const event:MatchEvent={id,matchSecond:Math.round(syntheticEvent.timestamp_seconds),videoSecond:syntheticEvent.timestamp_seconds,type:message.observation.event_type,title:message.insight.headline,detail:message.insight.explanation,candidate:message.insight.significance>=POLL_SIGNIFICANCE_THRESHOLD}
@@ -46,6 +62,7 @@ function App(){
         }
       }
       if(message.insight.publish_insight&&message.insight.significance>=POLL_SIGNIFICANCE_THRESHOLD&&message.insight.poll){
+        pollId.current=`poll-${id}`
         setPoll({id:`poll-${id}`,eventId:id,eventLabel:syntheticEvent?.label,eventTimestamp:syntheticEvent?.timestamp_seconds,question:message.insight.poll.question,options:message.insight.poll.options,significance:message.insight.significance,reason:message.insight.explanation,agentTrace:[`${syntheticEvent?'Synthetic event adapter':'Vision model'} · ${message.latency.vision_ms}ms`,`Match Analyst · ${message.latency.match_analyst_ms}ms`,`Fan Engagement · ${message.latency.fan_engagement_ms}ms`,'Policy · 60+ significance and dedup passed',`WebSocket · delivered · ${message.latency.total_ms}ms`],expiresAt:Date.now()+POLL_VOTING_SECONDS*1000});setPollClock(Date.now());setVoted(null);setCounts({})
       }
       return
@@ -59,7 +76,6 @@ function App(){
   },[])
 
   useEffect(()=>{pollId.current=poll?.id||null},[poll?.id])
-  useEffect(()=>{clockRef.current=clock},[clock])
   useEffect(()=>{
     if(!poll||voted)return
     const update=()=>{
@@ -84,16 +100,29 @@ function App(){
     let disposed=false,ws:WebSocket|undefined,reconnectTimer:number|undefined
     const connect=()=>{
       ws=new WebSocket(`${protocol}://${location.host}/ws`)
-      ws.onopen=()=>{console.info('[FanPulse] WebSocket connected');setConnected(true)}
-      ws.onclose=()=>{console.info('[FanPulse] WebSocket disconnected');setConnected(false);if(!disposed)reconnectTimer=window.setTimeout(connect,1500)}
+      ws.onopen=()=>{if(disposed)return;console.info('[FanPulse] WebSocket connected');setConnected(true)}
+      ws.onclose=()=>{
+        if(disposed)return
+        console.info('[FanPulse] WebSocket disconnected');setConnected(false)
+        const pending=syntheticPlayback.current?.pending
+        if(pending)syntheticPlayback.current?.failRequest(pending.eventId,pending.generation)
+        reconnectTimer=window.setTimeout(connect,1500)
+      }
       ws.onerror=()=>console.error('[FanPulse] WebSocket transport error')
       ws.onmessage=event=>{
         try{
           const message=JSON.parse(event.data)
           console.info('[FanPulse] WebSocket message',{type:message.type,generation:message.generation,session:message.session_id})
           if(message.type==='vote_results'&&message.poll_id===pollId.current)setCounts(message.counts)
-          if(message.session_id!==analysisSessionId||message.generation!==generation.current)return
+          if(message.session_id!==analysisSessionId)return
+          // Completion also releases requests from an old seek/restart generation.
+          if(message.type==='synthetic_complete'){
+            if(message.outcome==='complete')syntheticPlayback.current?.finishRequest(message.event_id,message.generation)
+            else syntheticPlayback.current?.failRequest(message.event_id,message.generation)
+          }
+          if(message.generation!==generation.current)return
           if(message.type==='analysis_status'){
+            if(message.event_id&&!syntheticPlayback.current?.isCurrent(message.event_id,message.generation))return
             setAnalysisStatus(message.status)
             if(message.status==='error')console.error('[FanPulse] analysis error',message.message)
           }
@@ -105,11 +134,22 @@ function App(){
     return()=>{disposed=true;if(reconnectTimer)window.clearTimeout(reconnectTimer);ws?.close()}
   },[applyVisionResult])
 
-  const postPlaybackState=useCallback(async (isPlaying:boolean,position:number)=>{
-    try{
-      const response=await fetch(`/api/analysis/sessions/${analysisSessionId}/state`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:generation.current,playing:isPlaying,position_seconds:position})})
-      if(!response.ok)throw new Error(`playback state rejected (${response.status})`)
-    }catch(error){console.error('[FanPulse] playback state error',error);setAnalysisStatus('offline')}
+  const postPlaybackState=useCallback((isPlaying:boolean,position:number,submittedGeneration=generation.current)=>{
+    const body=JSON.stringify({generation:submittedGeneration,playing:isPlaying,position_seconds:position})
+    // Preserve ordering when pause/seek races an already posted clock update.
+    const request=playbackStateChain.current.then(async()=>{
+      try{
+        const response=await fetch(`/api/analysis/sessions/${analysisSessionId}/state`,{method:'POST',headers:{'Content-Type':'application/json'},body,signal:AbortSignal.timeout(5000)})
+        if(!response.ok)throw new Error(`playback state rejected (${response.status})`)
+        return true
+      }catch(error){
+        console.error('[FanPulse] playback state error',error)
+        if(submittedGeneration===generation.current)setAnalysisStatus('offline')
+        return false
+      }
+    })
+    playbackStateChain.current=request
+    return request
   },[])
 
   const resetAnalysis=useCallback((position:number,isPlaying:boolean)=>{
@@ -141,67 +181,87 @@ function App(){
   },[clock,mode,playing,postPlaybackState,sourceMode,videoMissing])
 
   useEffect(()=>{
-    if(sourceMode!=='synthetic'||!playing)return
-    syntheticStartedAt.current=performance.now();syntheticStartClock.current=clockRef.current
+    const playback=syntheticPlayback.current
+    if(sourceMode!=='synthetic'||!playing||!playback)return
     const tick=(now:number)=>{
-      let next=Math.min(SYNTHETIC_DURATION,syntheticStartClock.current+(now-syntheticStartedAt.current)/1000*rate)
-      const sync=syntheticSync.current
-      if(sync&&!sync.released){
-        const following=SYNTHETIC_EVENTS.find(item=>item.time>sync.eventTime)
-        const holdAt=Math.min(sync.eventTime+10,(following?.time??SYNTHETIC_DURATION)-1)
-        const resultShown=sync.resultAt!==null&&now-sync.resultAt>=SYNTHETIC_RESULT_HOLD_MS
-        const timedOut=now-sync.submittedAt>=SYNTHETIC_AGENT_TIMEOUT_MS
-        if(resultShown||timedOut){
-          sync.released=true
-          if(timedOut&&!sync.resultAt)setAnalysisStatus('agent timeout · continuing')
-        }else if(next>=holdAt){
-          next=holdAt;syntheticStartClock.current=holdAt;syntheticStartedAt.current=now
-          if(!sync.resultAt)setAnalysisStatus('awaiting Foundry agents')
-        }
+      const step=playback.advance(now,rate,generation.current),next=step.clock
+      if(displayedSyntheticEvent.current!==step.event.id){
+        displayedSyntheticEvent.current=step.event.id
+        pollId.current=null
+        setLatestResult(null);setPoll(null);setVoted(null);setCounts({});setAnalysisLatency(null);setAnalysisStatus('watching the play')
       }
       setClock(next)
+      if(debugSynthetic)setSyntheticDiagnostics({clock:+next.toFixed(3),event:step.event.id,request:playback.pending,generation:generation.current})
+      setSyntheticHold(step.waiting?(step.resultReady?'Moment held for your insight and vote':'Analysing this play…'):null)
+      if(step.timedOut)setAnalysisStatus('analysis delayed · continuing')
+      if(step.failed)setAnalysisStatus('analysis unavailable · continuing')
       const second=Math.floor(next)
       if(second!==lastStateSecond.current){lastStateSecond.current=second;void postPlaybackState(true,next)}
-      for(const item of SYNTHETIC_EVENTS){
-        if(next>=item.time&&!submittedEvents.current.has(item.id)){
-          submittedEvents.current.add(item.id);syntheticSync.current={eventId:item.id,eventLabel:item.label,eventTime:item.time,submittedAt:now,resultAt:null,released:false};setAnalysisStatus('queued')
-          void fetch(`/api/analysis/sessions/${analysisSessionId}/synthetic`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:generation.current,viewer_mode:mode,event_id:item.id,event_label:item.label,observation:item.observation})})
-            .then(async response=>{if(!response.ok)throw new Error(`synthetic event rejected (${response.status}): ${await response.text()}`)})
-            .catch(error=>{console.error('[FanPulse] synthetic submission error',error);setAnalysisStatus('offline')})
-          break
-        }
+      const item=step.submission
+      if(item){
+        const submittedGeneration=generation.current
+        setAnalysisStatus('queued')
+        void (async()=>{
+          // Establish this generation/position before submitting its observation.
+          if(!await postPlaybackState(true,next,submittedGeneration))throw new Error('Playback state is unavailable')
+          if(submittedGeneration!==generation.current){playback.failRequest(item.id,submittedGeneration);return}
+          const response=await fetch(`/api/analysis/sessions/${analysisSessionId}/synthetic`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:submittedGeneration,viewer_mode:mode,event_id:item.id,event_label:item.label,observation:item.observation})})
+          if(!response.ok)throw new Error(`synthetic event rejected (${response.status})`)
+          const accepted=await response.json()
+          if(accepted.status==='ignored')throw new Error(`synthetic event ignored (${accepted.reason})`)
+        })().catch(error=>{
+          console.error('[FanPulse] synthetic submission error',error)
+          playback.failRequest(item.id,submittedGeneration)
+        })
       }
-      if(next>=SYNTHETIC_DURATION){setPlaying(false);void postPlaybackState(false,next);return}
+      if(next>=playback.match.duration){setPlaying(false);void postPlaybackState(false,next);return}
       animationFrame.current=requestAnimationFrame(tick)
     }
     animationFrame.current=requestAnimationFrame(tick)
-    return()=>cancelAnimationFrame(animationFrame.current)
-  },[mode,playing,postPlaybackState,rate,sourceMode])
+    return()=>{cancelAnimationFrame(animationFrame.current);playback.pause()}
+  },[mode,playing,postPlaybackState,rate,sourceMode,syntheticMatch])
 
   async function vote(optionId:string){
     if(voted||!poll||Date.now()>=poll.expiresAt){setPoll(null);return}
+    const submittedPollId=poll.id
     setVoted(optionId)
     try{
       const response=await fetch('/api/votes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({poll_id:poll.id,option_id:optionId,viewer_id:viewerId})})
       if(!response.ok)throw Error(`vote rejected (${response.status})`)
-      setCounts((await response.json()).counts);console.info('[FanPulse] vote recorded',{poll:poll.id,option:optionId})
-    }catch(error){console.error('[FanPulse] vote error',error);setVoted(null)}
+      const result=await response.json()
+      if(pollId.current===submittedPollId)setCounts(result.counts)
+      console.info('[FanPulse] vote recorded',{poll:submittedPollId,option:optionId})
+    }catch(error){console.error('[FanPulse] vote error',error);if(pollId.current===submittedPollId)setVoted(null)}
   }
 
   function reset(){
+    pollId.current=null
     video.current?.pause();if(video.current)video.current.currentTime=0
-    submittedEvents.current.clear();syntheticSync.current=null;setClock(0);setPlaying(false);setTimeline([]);setPoll(null);setLatestResult(null);setVoted(null);setCounts({});resetAnalysis(0,false)
+    syntheticPlayback.current?.seek(0);displayedSyntheticEvent.current=null;setSyntheticHold(null);setClock(0);setPlaying(false);setTimeline([]);setPoll(null);setLatestResult(null);setVoted(null);setCounts({});resetAnalysis(0,false)
   }
   function toggle(){
     if(sourceMode==='synthetic'){
       if(playing){
-        const active=eventAt(clock);submittedEvents.current=new Set(SYNTHETIC_EVENTS.filter(item=>!active||item.time<active.time).map(item=>item.id));syntheticSync.current=null;setPlaying(false);resetAnalysis(clock,false)
-      }else{setPlaying(true);setAnalysisStatus('sampling');void postPlaybackState(true,clock)}
+        syntheticPlayback.current?.pause();setPlaying(false);setAnalysisStatus('paused');void postPlaybackState(false,clock)
+      }else if(syntheticMatch){
+        if(clock>=syntheticMatch.duration){reset();setPlaying(true);void postPlaybackState(true,0)}
+        else{setPlaying(true);setAnalysisStatus('watching the play');void postPlaybackState(true,clock)}
+      }
       return
     }
     if(!videoMissing&&video.current){if(video.current.paused)void video.current.play();else video.current.pause()}
   }
-  function switchSource(next:SourceMode){if(next===sourceMode)return;video.current?.pause();setSourceMode(next);setDuration(next==='synthetic'?SYNTHETIC_DURATION:video.current?.duration||0);reset()}
+  function switchSource(next:SourceMode){if(next===sourceMode)return;video.current?.pause();setSourceMode(next);setDuration(next==='synthetic'?syntheticMatch?.duration??0:video.current?.duration||0);reset()}
+  function seekTo(position:number){
+    pollId.current=null
+    setClock(position);setLatestResult(null);setPoll(null);setVoted(null);setCounts({});setSyntheticHold(null)
+    if(sourceMode==='synthetic'){syntheticPlayback.current?.seek(position);displayedSyntheticEvent.current=null}
+    if(video.current)video.current.currentTime=position
+    resetAnalysis(position,playing)
+  }
+  const playbackUnavailable=sourceMode==='video'?videoMissing:!syntheticMatch
+  const playbackDuration=sourceMode==='synthetic'?syntheticMatch?.duration??0:duration
+  const currentSceneKey=sourceMode==='synthetic'&&syntheticMatch?eventAt(syntheticMatch,clock).id:sourceMode
   const total=Object.values(counts).reduce((sum,count)=>sum+count,0)
   const pollSecondsRemaining=poll?Math.max(0,Math.ceil((poll.expiresAt-pollClock)/1000)):0
   const time=useMemo(()=>`${Math.floor(clock/60).toString().padStart(2,'0')}:${Math.floor(clock%60).toString().padStart(2,'0')}`,[clock])
@@ -214,19 +274,21 @@ function App(){
         <div className="video-shell">
           {sourceMode==='video'
             ?<video ref={video} src="/media/match.mov" playsInline onLoadedMetadata={event=>{setDuration(event.currentTarget.duration);console.info('[FanPulse] video loaded',{duration:event.currentTarget.duration,width:event.currentTarget.videoWidth,height:event.currentTarget.videoHeight})}} onTimeUpdate={event=>setClock(event.currentTarget.currentTime)} onPlay={event=>{setPlaying(true);setAnalysisStatus('sampling');void postPlaybackState(true,event.currentTarget.currentTime)}} onPause={event=>{setPlaying(false);resetAnalysis(event.currentTarget.currentTime,false)}} onSeeked={event=>resetAnalysis(event.currentTarget.currentTime,!event.currentTarget.paused)} onError={()=>{setVideoMissing(true);setAnalysisStatus('video unavailable')}} />
-            :<SyntheticPitch clock={clock}/>}
+            :syntheticMatch?<SyntheticPitch match={syntheticMatch} clock={clock}/>:<div className="placeholder"><div><Activity/><strong>{syntheticError?'MATCH DATA UNAVAILABLE':'LOADING SYNTHETIC MATCH'}</strong><p>{syntheticError??'Preparing the match timeline…'}</p></div></div>}
           {sourceMode==='video'&&videoMissing&&<div className="placeholder"><div><Radio/><strong>VIDEO UNAVAILABLE</strong><p>Add the licensed recording at <code>apps/web/public/media/match.mov</code>.</p></div></div>}
           <div className="broadcast-badge"><CircleDot size={13}/> {sourceMode==='synthetic'?'SYNTHETIC · FIXED SEED':'VISION · REAL FRAMES'}</div>
-          <AnimatePresence>{poll&&!voted&&<motion.div className="moment-toast" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0}}><Sparkles/><div><span>AI MOMENT DETECTED</span><strong>{poll.significance}% significance</strong></div><ChevronRight/></motion.div>}</AnimatePresence>
-          <div className="controls"><button onClick={toggle} disabled={sourceMode==='video'&&videoMissing}>{playing?<Pause/>:<Play/>}</button><div className="progress"><input aria-label="Match position" type="range" min="0" max={duration||1} value={clock} disabled={sourceMode==='video'&&videoMissing} onChange={event=>{const position=+event.target.value,active=eventAt(position);setClock(position);clockRef.current=position;syntheticStartClock.current=position;syntheticStartedAt.current=performance.now();submittedEvents.current=new Set(SYNTHETIC_EVENTS.filter(item=>sourceMode==='synthetic'&&active?item.time<active.time:item.time<position).map(item=>item.id));syntheticSync.current=null;if(video.current)video.current.currentTime=position;resetAnalysis(position,playing)}}/><span style={{width:`${duration?clock/duration*100:0}%`}}/></div><span>{time}</span><button className="rate" onClick={()=>{const next=rate===4?1:rate*2;setRate(next);if(video.current)video.current.playbackRate=next}}>{rate}×</button></div>
+          {sourceMode==='synthetic'&&syntheticHold&&<div className="synthetic-hold" role="status">{syntheticHold}</div>}
+          {sourceMode==='synthetic'&&debugSynthetic&&<output className="synthetic-diagnostics">{JSON.stringify({...syntheticDiagnostics,result:latestResult?.synthetic_event?.id,poll:poll?.eventId})}</output>}
+          <AnimatePresence key={currentSceneKey}>{poll&&!voted&&<motion.div className="moment-toast" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0}}><Sparkles/><div><span>AI MOMENT DETECTED</span><strong>{poll.significance}% significance</strong></div><ChevronRight/></motion.div>}</AnimatePresence>
+          <div className="controls"><button onClick={toggle} aria-label={playing?'Pause match':'Play match'} disabled={playbackUnavailable}>{playing?<Pause/>:<Play/>}</button><div className="progress"><input aria-label="Match position" type="range" min="0" max={playbackDuration||1} step="0.1" value={clock} disabled={playbackUnavailable} onChange={event=>seekTo(+event.target.value)}/><span style={{width:`${playbackDuration?clock/playbackDuration*100:0}%`}}/></div><span>{time}</span><button className="rate" aria-label="Playback speed" onClick={()=>{const next=rate===4?1:rate*2;setRate(next);if(video.current)video.current.playbackRate=next}}>{rate}×</button></div>
         </div>
-        <div className="under-video"><div><button className="primary" onClick={toggle} disabled={sourceMode==='video'&&videoMissing}>{playing?<><Pause/> Pause match</>:<><Play/> {sourceMode==='synthetic'?'Play synthetic match':'Play with vision'}</>}</button><button onClick={reset}><RefreshCw/> Restart</button></div></div>
+        <div className="under-video"><div><button className="primary" onClick={toggle} disabled={playbackUnavailable}>{playing?<><Pause/> Pause match</>:<><Play/> {sourceMode==='synthetic'?'Play synthetic match':'Play with vision'}</>}</button><button onClick={reset}><RefreshCw/> Restart</button></div></div>
         <Timeline items={timeline} sourceMode={sourceMode}/>
       </section>
       <aside>
         <div className="panel-heading"><div><span className="eyebrow"><Bot/> FOUNDRY AGENT TEAM</span><h2>Live intelligence</h2><small className="analysis-meta">{analysisStatus}{analysisLatency!==null?` · ${(analysisLatency/1000).toFixed(1)}s`:''}</small></div><span className={connected?'status connected':'status'}>{connected?'Connected':'Disconnected'}</span></div>
-        <div className="intelligence-stack">
-          <AnimatePresence mode="wait">{latestResult?<ObservationCard key={`${latestResult.generation}-${latestResult.window.end_seconds}`} result={latestResult}/>:<EmptyState/>}</AnimatePresence>
+        <div className="intelligence-stack" key={currentSceneKey}>
+          <AnimatePresence mode="wait">{latestResult?<ObservationCard key={`${latestResult.generation}-${latestResult.window.end_seconds}`} result={latestResult}/>:<EmptyState sourceMode={sourceMode}/>}</AnimatePresence>
           <AnimatePresence>{poll&&<PollCard key={poll.id+mode} poll={poll} counts={counts} total={total} voted={voted} secondsRemaining={pollSecondsRemaining} vote={vote}/>}</AnimatePresence>
         </div>
       </aside>
@@ -237,9 +299,9 @@ function App(){
 
 function PollCard({poll,counts,total,voted,secondsRemaining,vote}:{poll:Poll;counts:Counts;total:number;voted:string|null;secondsRemaining:number;vote:(id:string)=>void}){
   const origin=poll.eventTimestamp===undefined?null:`${Math.floor(poll.eventTimestamp/60).toString().padStart(2,'0')}:${Math.floor(poll.eventTimestamp%60).toString().padStart(2,'0')} · ${poll.eventLabel}`
-  return <motion.div className="poll-card significant-poll" initial={{opacity:0,y:24,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:10,scale:.98}} transition={{type:'spring',stiffness:260,damping:22}}><div className="poll-glow" aria-hidden="true"/><div className="signal"><span className="signal-icon"><Sparkles/></span><span>SIGNIFICANT MOMENT · FAN VOTE</span></div>{origin&&<div className="poll-origin">{origin}</div>}<div className={voted?'poll-timer voted':'poll-timer'}><span>{voted?'VOTE SUBMITTED':'VOTING CLOSES IN'}</span><strong>{voted?'✓':`${secondsRemaining}s`}</strong></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
+  return <motion.div className="poll-card significant-poll" initial={{opacity:0,y:24,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:10,scale:.98}} transition={{type:'spring',stiffness:260,damping:22}}><div className="poll-glow" aria-hidden="true"/><div className="signal"><span className="signal-icon"><Sparkles/></span><span>SIGNIFICANT MOMENT · FAN VOTE</span></div>{origin&&<div className="poll-origin">{origin}</div>}<div className={voted?'poll-timer voted':'poll-timer'}><span>{voted?'VOTE SUBMITTED':origin?'VOTE ON THIS PLAY':'VOTING CLOSES IN'}</span><strong>{voted?'✓':origin?'Until next play':`${secondsRemaining}s`}</strong></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
 }
-function EmptyState(){return <motion.div className="empty" initial={{opacity:0}} animate={{opacity:1}}><div><Gauge/><i/></div><h3>Watching the match</h3><p>Foundry vision, Match Analyst, and Fan Engagement are looking for grounded, meaningful moments. Routine play is shown with its reason instead of becoming a poll.</p></motion.div>}
+function EmptyState({sourceMode}:{sourceMode:SourceMode}){return <motion.div className="empty" initial={{opacity:0}} animate={{opacity:1}}><div><Gauge/><i/></div><h3>Watching the match</h3><p>{sourceMode==='synthetic'?'Match Analyst and Fan Engagement assess the same synthetic events that drive the animation. Insights and votes appear here for the current play.':'Foundry vision, Match Analyst, and Fan Engagement are looking for grounded, meaningful moments. Routine play is shown with its reason instead of becoming a poll.'}</p></motion.div>}
 function ObservationCard({result}:{result:VisionResultMessage}){const synthetic=result.provider.vision_model==='synthetic-observation-adapter',direct=['vision-direct','synthetic-direct'].includes(result.provider.agent),published=result.policy.outcome==='published',origin=result.synthetic_event;return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className={`observation-state ${published?'published':'suppressed'}`}><Activity/><span>{direct?'MOMENT DETECTED':published?'INSIGHT PUBLISHED':'MOMENT ASSESSED'}</span><b className={`confidence-level ${result.observation.confidence}`}>{result.observation.confidence.toUpperCase()} CONFIDENCE</b></div>{origin&&<small className="insight-origin">{Math.floor(origin.timestamp_seconds/60).toString().padStart(2,'0')}:{Math.floor(origin.timestamp_seconds%60).toString().padStart(2,'0')} · {origin.label}</small>}<h3>{result.observation.description}</h3><p>{result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>{direct?(synthetic?'Awaiting Foundry agents':'Vision direct'):published?'Foundry agents · published':'Foundry agents · suppressed'}</dd></div></dl></motion.div>}
 function Timeline({items,sourceMode}:{items:MatchEvent[];sourceMode:SourceMode}){return <section className="timeline"><div className="timeline-title"><span>Match timeline</span><small>{sourceMode==='synthetic'?'SYNTHETIC EVENT OBSERVATIONS':'VISION OBSERVATIONS'}</small></div><div className="event-list">{items.length?items.map(event=><motion.div initial={{opacity:0}} animate={{opacity:1}} className="event" key={event.id}><time>{Math.floor(event.matchSecond/60).toString().padStart(2,'0')}:{(event.matchSecond%60).toString().padStart(2,'0')}</time><i className={event.candidate?'hot':''}/><div><strong>{event.title}</strong><span>{event.detail}</span></div></motion.div>):<p className="waiting">Play the {sourceMode==='synthetic'?'synthetic match':'video'} to begin Foundry analysis.</p>}</div></section>}
 export default App

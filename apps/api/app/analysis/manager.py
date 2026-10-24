@@ -42,6 +42,7 @@ class SessionState:
     last_accepted_end: float = -1
     last_poll_at: float = -999
     poll_keys: set[str] = field(default_factory=set)
+    synthetic_request: tuple[int, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -70,11 +71,18 @@ class AnalysisManager:
         self.activity = activity
         self.sessions: dict[str, SessionState] = {}
         self._inference_slot = asyncio.Semaphore(1)
+        self._agent_slot = asyncio.Semaphore(1)
 
     async def update_state(self, session_id: str, update: PlaybackState):
         state = self.sessions.setdefault(session_id, SessionState())
+        if update.generation < state.generation:
+            return
+        abandoned = None
         if update.generation != state.generation:
             state.pending = None
+            if state.pending_agent and state.pending_agent.synthetic_event:
+                abandoned = state.pending_agent
+                state.synthetic_request = None
             state.pending_agent = None
             state.last_accepted_end = -1
             state.poll_keys.clear()
@@ -84,7 +92,16 @@ class AnalysisManager:
         state.position_seconds = update.position_seconds
         if not update.playing:
             state.pending = None
-            state.pending_agent = None
+            # Synthetic results remain useful while paused on their exact play.
+            # Keep that work; a pause/resume should not repeat a paid agent call.
+            if state.pending_agent and not state.pending_agent.synthetic_event:
+                state.pending_agent = None
+        if abandoned:
+            await self.broadcast({
+                "type": "synthetic_complete", "session_id": session_id,
+                "generation": abandoned.generation,
+                "event_id": abandoned.synthetic_event["id"], "outcome": "discarded",
+            })
         logger.info(
             "fanpulse playback_state session=%s generation=%d playing=%s timestamp=%.3f",
             session_id,
@@ -150,10 +167,13 @@ class AnalysisManager:
             return SubmissionResult(status="ignored", reason="stale_or_paused")
         if timestamp <= state.last_accepted_end:
             return SubmissionResult(status="ignored", reason="duplicate_window")
+        if state.synthetic_request is not None:
+            return SubmissionResult(status="ignored", reason="agents_busy")
         if abs(state.position_seconds - timestamp) > 15:
             return SubmissionResult(status="ignored", reason="stale_timeline")
 
         state.last_accepted_end = timestamp
+        state.synthetic_request = (submission.generation, submission.event_id)
         started = monotonic()
         synthetic_result = VisionInference(
             result=VisionBatchResult(
@@ -296,8 +316,13 @@ class AnalysisManager:
             while state.pending_agent is not None:
                 work = state.pending_agent
                 state.pending_agent = None
+                outcome = "failed"
                 try:
-                    agent_result = await self.analyst.analyze(work.observation, work.viewer_mode)
+                    async with self._agent_slot:
+                        if work.generation != state.generation:
+                            outcome = "discarded"
+                            continue
+                        agent_result = await self.analyst.analyze(work.observation, work.viewer_mode)
                     logger.info(
                         "fanpulse agent_complete session=%s generation=%d duration_ms=%d agent=%s publish=%s poll=%s",
                         session_id,
@@ -308,13 +333,15 @@ class AnalysisManager:
                         agent_result.decision.poll is not None,
                     )
                     if not self._is_current(
-                        state, work.generation, work.end_seconds
+                        state, work.generation, work.end_seconds,
+                        allow_paused=work.synthetic_event is not None,
                     ):
                         logger.info(
                             "fanpulse result_discarded session=%s generation=%d stage=agent reason=stale_playback",
                             session_id,
                             work.generation,
                         )
+                        outcome = "discarded"
                         continue
                     await self._deliver_result(
                         session_id,
@@ -327,6 +354,7 @@ class AnalysisManager:
                         work.started,
                         work.synthetic_event,
                     )
+                    outcome = "complete"
                 except asyncio.CancelledError:
                     raise
                 except FoundryRateLimitError as exc:
@@ -340,6 +368,7 @@ class AnalysisManager:
                         "type": "analysis_status",
                         "session_id": session_id,
                         "generation": work.generation,
+                        "event_id": work.synthetic_event["id"] if work.synthetic_event else None,
                         "status": "rate_limited",
                         "message": "Agent enrichment was skipped; live vision analysis will continue.",
                     })
@@ -350,6 +379,24 @@ class AnalysisManager:
                         work.generation,
                         str(exc)[:200],
                     )
+                    if work.synthetic_event:
+                        await self.broadcast({
+                            "type": "analysis_status", "session_id": session_id,
+                            "generation": work.generation, "event_id": work.synthetic_event["id"],
+                            "status": "error", "message": "Agent analysis could not complete for this play.",
+                        })
+                finally:
+                    if work.synthetic_event:
+                        request = (work.generation, work.synthetic_event["id"])
+                        if state.synthetic_request == request:
+                            state.synthetic_request = None
+                        # Always acknowledge completion, even if a seek or a
+                        # timeout made the result stale, to free the client slot.
+                        await self.broadcast({
+                            "type": "synthetic_complete", "session_id": session_id,
+                            "generation": work.generation, "event_id": work.synthetic_event["id"],
+                            "outcome": outcome,
+                        })
         finally:
             state.agent_worker = None
 
@@ -438,9 +485,9 @@ class AnalysisManager:
         )
 
     @staticmethod
-    def _is_current(state: SessionState, generation: int, window_end: float) -> bool:
+    def _is_current(state: SessionState, generation: int, window_end: float, *, allow_paused: bool = False) -> bool:
         return (
-            state.playing
+            (state.playing or allow_paused)
             and state.generation == generation
             and state.position_seconds >= window_end - 2
             and state.position_seconds - window_end <= 15

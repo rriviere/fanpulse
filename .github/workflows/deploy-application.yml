@@ -50,7 +50,14 @@ jobs:
         run: |
           npm ci
           npm run lint
+          npm test
           npm run build
+
+      - name: Verify playback and voting synchronization without calling Foundry
+        working-directory: apps/web
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser
 
       - name: Assemble tested application
         run: |
@@ -208,5 +215,8 @@ jobs:
             sleep 15
           done
           curl --fail --silent --show-error --max-time 20 "$APP_URL/" >/dev/null
+          curl --fail --silent --show-error --max-time 20 \
+            "$APP_URL/simulations/reference-match.v1.json" | \
+            jq --exit-status '.version == 1 and (.players | length) == 22 and (.events | length) > 0' >/dev/null
           curl --fail --silent --show-error --max-time 20 \
             --range 0-1023 "$APP_URL/media/match.mov" >/dev/null

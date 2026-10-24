@@ -3,24 +3,33 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "scripts": {"dev":"vite","build":"tsc -b && vite build","lint":"eslint .","preview":"vite preview"},
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "preview": "vite preview",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "test:browser": "playwright test"
+  },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
     "lucide-react": "latest",
     "motion": "latest",
-    "recharts": "latest",
-    "vite": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "recharts": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
     "@eslint/js": "latest",
+    "@playwright/test": "^1.64.1",
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",
     "eslint-plugin-react-refresh": "latest",
     "globals": "latest",
+    "tsx": "^4.23.15",
     "typescript": "latest",
     "typescript-eslint": "latest"
   }

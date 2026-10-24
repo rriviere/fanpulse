@@ -62,8 +62,8 @@ cd apps/web
 npm run dev
 ```
 
-Open http://localhost:5173 and click **Play with vision**. Live vision is the
-only analysis mode. If the API, video, or Foundry configuration is unavailable,
+Open http://localhost:5173 and click **Play with vision**, or select **Synthetic
+match** to play the fictional scenario. If the API, video, or Foundry configuration is unavailable,
 the UI reports that condition instead of fabricating observations. Analysis and
 multi-user voting require the backend.
 
@@ -101,9 +101,14 @@ are version-controlled in [`ai/agents/`](ai/agents/README.md).
 ## Playback controls
 
 - Use **Play with vision** to start playback and live frame analysis.
+- Select **Synthetic match** to render continuous player/ball tracks from an
+  external JSON file and send the corresponding observations to real Foundry agents.
 - Pause or seek freely; playback generations prevent stale results appearing.
 - Use **Reset** to clear the client timeline and reset the backend match session.
 - Open two browser windows with different generated viewer IDs to demonstrate genuine shared voting.
+
+See [synthetic match data and synchronization](docs/SYNTHETIC_MATCH.md) for the
+editable scenario file, motion model, request limits and playback tests.
 
 ## Foundry vision proof of concept
 

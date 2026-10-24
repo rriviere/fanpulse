@@ -1,5 +1,7 @@
 import asyncio
 import base64
+import json
+from pathlib import Path
 import unittest
 
 from ai.agents.contracts import AgentInference, AgentPoll, AgentPollOption, MatchAnalystDecision, MatchAssessment
@@ -31,6 +33,13 @@ def window(generation: int, start: int) -> AnalysisWindow:
     return AnalysisWindow(
         generation=generation,
         frames=[BrowserFrame(timestamp_seconds=start + i, data_url=DATA_URL) for i in range(5)],
+    )
+
+
+def synthetic(generation: int = 1, timestamp: float = 12, event_id: str = "green-pressure"):
+    return SyntheticObservationSubmission(
+        generation=generation, event_id=event_id, event_label="Green pressure",
+        observation=observation(timestamp),
     )
 
 
@@ -131,6 +140,113 @@ class GatedAnalyst(MockAnalyst):
 
 
 class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_external_match_observations_satisfy_real_agent_contract(self):
+        match_file = Path(__file__).resolve().parents[2] / "web/public/simulations/reference-match.v1.json"
+        data = json.loads(match_file.read_text())
+        for event in data["events"]:
+            payload = SyntheticObservationSubmission(
+                generation=1, event_id=event["id"], event_label=event["label"],
+                observation=event["observation"],
+            )
+            self.assertEqual(payload.observation.video_timestamp_seconds, event["time"])
+
+    async def test_synthetic_pause_preserves_in_flight_result_without_resubmission(self):
+        messages = []
+
+        async def broadcast(message):
+            messages.append(message)
+
+        analyst = GatedAnalyst()
+        manager = AnalysisManager(MockVision(), analyst, broadcast)
+        await manager.update_state("s1", PlaybackState(generation=1, playing=True, position_seconds=12))
+        await manager.submit_synthetic("s1", synthetic())
+        # Pause before the scheduled worker even starts.
+        await manager.update_state("s1", PlaybackState(generation=1, playing=False, position_seconds=12))
+        await asyncio.sleep(0)
+        self.assertEqual(analyst.calls, 1)
+        analyst.gate.set()
+        await manager.sessions["s1"].agent_worker
+        self.assertTrue(any(message.get("provider", {}).get("agent") == "mock-agent" for message in messages))
+        self.assertIn("complete", [message["outcome"] for message in messages if message["type"] == "synthetic_complete"])
+        await manager.update_state("s1", PlaybackState(generation=1, playing=True, position_seconds=12))
+        duplicate = await manager.submit_synthetic("s1", synthetic())
+        self.assertEqual(duplicate.reason, "duplicate_window")
+        self.assertEqual(analyst.calls, 1)
+        await manager.close()
+
+    async def test_seek_keeps_old_request_reserved_until_server_completion(self):
+        messages = []
+
+        async def broadcast(message):
+            messages.append(message)
+
+        analyst = GatedAnalyst()
+        manager = AnalysisManager(MockVision(), analyst, broadcast)
+        await manager.update_state("s1", PlaybackState(generation=1, playing=True, position_seconds=12))
+        await manager.submit_synthetic("s1", synthetic())
+        await asyncio.sleep(0)
+        await manager.update_state("s1", PlaybackState(generation=2, playing=True, position_seconds=103))
+        busy = await manager.submit_synthetic("s1", synthetic(2, 103, "black-shot"))
+        self.assertEqual(busy.reason, "agents_busy")
+        analyst.gate.set()
+        await manager.sessions["s1"].agent_worker
+        completions = [message for message in messages if message["type"] == "synthetic_complete"]
+        self.assertEqual(completions[0]["generation"], 1)
+        self.assertEqual(completions[0]["outcome"], "discarded")
+        self.assertFalse(any(message.get("provider", {}).get("agent") == "mock-agent" for message in messages))
+        accepted = await manager.submit_synthetic("s1", synthetic(2, 103, "black-shot"))
+        self.assertEqual(accepted.status, "queued")
+        await manager.sessions["s1"].agent_worker
+        await manager.close()
+
+    async def test_agent_calls_are_serialized_across_sessions(self):
+        messages = []
+
+        async def broadcast(message):
+            messages.append(message)
+
+        analyst = GatedAnalyst()
+        manager = AnalysisManager(MockVision(), analyst, broadcast)
+        for session in ["one", "two"]:
+            await manager.update_state(session, PlaybackState(generation=1, playing=True, position_seconds=12))
+            await manager.submit_synthetic(session, synthetic())
+        await asyncio.sleep(0)
+        self.assertEqual(analyst.calls, 1)
+        tasks = [state.agent_worker for state in manager.sessions.values()]
+        analyst.gate.set()
+        await asyncio.gather(*tasks)
+        self.assertEqual(analyst.calls, 2)
+        await manager.close()
+
+    async def test_synthetic_failure_always_completes_and_releases_request(self):
+        class FailingAnalyst:
+            async def analyze(self, *_args):
+                raise RuntimeError("Test agent failure")
+
+        messages = []
+
+        async def broadcast(message):
+            messages.append(message)
+
+        manager = AnalysisManager(MockVision(), FailingAnalyst(), broadcast)
+        await manager.update_state("s1", PlaybackState(generation=1, playing=True, position_seconds=12))
+        await manager.submit_synthetic("s1", synthetic())
+        await manager.sessions["s1"].agent_worker
+        self.assertIsNone(manager.sessions["s1"].synthetic_request)
+        completion = next(message for message in messages if message["type"] == "synthetic_complete")
+        self.assertEqual(completion["outcome"], "failed")
+        self.assertEqual(completion["event_id"], "green-pressure")
+        await manager.close()
+
+    async def test_out_of_order_state_updates_cannot_restore_an_old_generation(self):
+        manager = AnalysisManager(MockVision(), MockAnalyst(), lambda _message: None)
+        await manager.update_state("s1", PlaybackState(generation=3, playing=False, position_seconds=100))
+        await manager.update_state("s1", PlaybackState(generation=2, playing=True, position_seconds=12))
+        self.assertEqual(manager.sessions["s1"].generation, 3)
+        self.assertEqual(manager.sessions["s1"].position_seconds, 100)
+        self.assertFalse(manager.sessions["s1"].playing)
+        await manager.close()
+
     async def test_synthetic_observation_bypasses_vision_and_uses_agents(self):
         messages = []
 

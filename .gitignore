@@ -1,6 +1,8 @@
 node_modules/
 dist/
 *.tsbuildinfo
+apps/web/test-results/
+apps/web/playwright-report/
 .pytest_cache/
 .venv/
 .cache/
