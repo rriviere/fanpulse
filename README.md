@@ -135,6 +135,12 @@ sequenceDiagram
 - A poll appears only when the score is at least 60 and the backend confirms it is timely and not a duplicate.
 - If Foundry is unavailable, FanPulse reports the problem instead of displaying a made-up answer.
 
+### Personalisation and live voting
+
+Viewers can choose **Casual** for a clear, simple explanation or **Tactical** for deeper football context. Both views are based on the same match evidence.
+
+When a poll appears, each viewer can vote once and watch the shared totals update live. This lets fans compare their reading of the game with the wider audience without leaving the match.
+
 ## Synthetic data
 
 FanPulse was originally designed to analyse video. In that path, the browser captures one compressed JPEG frame per video second and builds a rolling window of five ordered frames from the current playback position. It submits that window, including each frame's video timestamp and playback generation, to `/api/analysis/sessions/{session_id}/windows`. FastAPI validates the payload and sends the frame content directly to the configured multimodal `gpt-5-mini` deployment in Microsoft Foundry. The model returns a schema-constrained `FootballObservation` describing only what it can see: the event type, team in possession, field zone, description, evidence, confidence and whether the moment appears significant.
@@ -209,17 +215,6 @@ Foundry inference is slower and less predictable than browser animation. FanPuls
 8. The poll closes when its play changes; historical insights remain in the Match Timeline.
 
 These controls keep the visible play, Live Intelligence card and vote attached to the same event while preventing a slow model from increasing request concurrency.
-
-## Personalisation and live voting
-
-The mode selector changes the `viewer_mode` submitted with each observation:
-
-| Mode | Intended presentation |
-| --- | --- |
-| **Casual** | Accessible language, concise explanation and minimal tactical terminology |
-| **Tactical** | Deeper football context for viewers who want to understand the shape and consequence of the play |
-
-When the Fan Engagement agent returns a valid poll, FastAPI applies server-side eligibility rules before publishing it. A browser-generated viewer ID permits one vote per viewer and poll. Production votes are stored in Azure Cosmos DB and updated totals are broadcast to every connected WebSocket client. Local development uses SQLite with the same interface.
 
 ## Correctness, safety and cost controls
 
