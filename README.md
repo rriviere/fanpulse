@@ -27,30 +27,41 @@ The hackathon experience brings that vision to life through a continuous 240-sec
 
 ```mermaid
 flowchart TB
-    WEB["<b>FanPulse Web Application</b><br/><br/>Container: React + TypeScript<br/><br/>Displays the synthetic match, Live Intelligence,<br/>personalised viewing modes and fan voting"]
-
-    subgraph Application["FanPulse API Application"]
-        API["<b>FanPulse API</b><br/><br/>Container: Python + FastAPI<br/><br/>Validates match observations, orchestrates agents,<br/>applies publishing policy and streams live updates"]
+    subgraph Client["Client"]
+        WEB["React Web Application"]
     end
 
-    subgraph Azure["Azure Managed Services"]
+    subgraph Application["Application Services · Azure App Service"]
+        API["FastAPI Backend"]
+    end
+
+    subgraph Foundry["Microsoft Foundry · gpt-5-mini"]
         direction LR
-        FOUNDRY["<b>Foundry Agent Pipeline</b><br/><br/>Service: Microsoft Foundry + gpt-5-mini<br/><br/>Match Analyst Agent assesses significance;<br/>Fan Engagement Agent creates insights and polls"]
-        COSMOS["<b>FanPulse Activity Store</b><br/><br/>Service: Azure Cosmos DB for NoSQL<br/><br/>Persists structured analysis activity,<br/>poll votes and live vote totals"]
+        ANALYST["Match Analyst Agent"]
+        ENGAGEMENT["Fan Engagement Agent"]
     end
 
-    WEB -->|"Makes API calls to<br/>observations, playback state and votes"| API
-    API -->|"Publishes WebSocket updates to<br/>insights, polls and vote totals"| WEB
-    API -->|"Runs grounded agent workflow"| FOUNDRY
-    FOUNDRY -->|"Returns structured decisions"| API
-    API -->|"Stores and retrieves activity and votes"| COSMOS
+    subgraph Data["Data Store"]
+        COSMOS[("Azure Cosmos DB")]
+    end
 
-    classDef container fill:#1769c2,stroke:#0b3f78,color:#fff,stroke-width:2px;
-    classDef component fill:#4799e8,stroke:#1769c2,color:#fff,stroke-width:2px;
-    class WEB container;
-    class API,FOUNDRY,COSMOS component;
-    style Application fill:#303238,stroke:#5b5e66,color:#fff,stroke-width:2px
-    style Azure fill:#303238,stroke:#5b5e66,color:#fff,stroke-width:2px
+    WEB <-->|"HTTP API + WebSocket"| API
+    API <-->|"grounded assessment"| ANALYST
+    API <-->|"insights + polls"| ENGAGEMENT
+    API <-->|"activity + votes"| COSMOS
+
+    classDef client fill:#f1efff,stroke:#7565d6,color:#171329,stroke-width:1px;
+    classDef service fill:#e7ddff,stroke:#7b61c9,color:#171329,stroke-width:1px;
+    classDef agent fill:#ddd0ff,stroke:#6f52bd,color:#171329,stroke-width:1px;
+    classDef database fill:#d9e9ff,stroke:#5279b8,color:#171329,stroke-width:1px;
+    class WEB client;
+    class API service;
+    class ANALYST,ENGAGEMENT agent;
+    class COSMOS database;
+    style Client fill:#fffde8,stroke:#d8cf80,color:#171329
+    style Application fill:#fffde8,stroke:#d8cf80,color:#171329
+    style Foundry fill:#fffde8,stroke:#d8cf80,color:#171329
+    style Data fill:#fffde8,stroke:#d8cf80,color:#171329
 ```
 
 ### Two ways in. One real AI pipeline.
