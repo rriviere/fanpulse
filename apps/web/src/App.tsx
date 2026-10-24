@@ -19,6 +19,7 @@ const debugSynthetic=new URLSearchParams(location.search).has('debugSynthetic')
 
 function App(){
   const video=useRef<HTMLVideoElement>(null)
+  const videoNotice=useRef<HTMLDialogElement>(null)
   const [clock,setClock]=useState(0), [playing,setPlaying]=useState(false), [rate,setRate]=useState(1)
   const [sourceMode,setSourceMode]=useState<SourceMode>('synthetic')
   const [mode,setMode]=useState<ViewerMode>('casual'), [timeline,setTimeline]=useState<MatchEvent[]>([])
@@ -268,7 +269,15 @@ function App(){
   const time=useMemo(()=>`${Math.floor(clock/60).toString().padStart(2,'0')}:${Math.floor(clock%60).toString().padStart(2,'0')}`,[clock])
 
   return <main>
-    <header><div className="brand"><div className="mark"><Sparkles size={17}/></div><div><strong>FANPULSE</strong><span>Your Voice in the Game</span></div></div><div className="header-actions"><div className="source-switch"><button className={sourceMode==='video'?'active':''} onClick={()=>switchSource('video')}>Video</button><button className={sourceMode==='synthetic'?'active':''} onClick={()=>switchSource('synthetic')}>Synthetic match</button></div><span className="live"><i/> AI ACTIVE</span><div className="mode"><button className={mode==='casual'?'active':''} onClick={()=>setMode('casual')}>Casual</button><button className={mode==='analyst'?'active':''} onClick={()=>setMode('analyst')}>Tactical</button></div></div></header>
+    <header><div className="brand"><div className="mark"><Sparkles size={17}/></div><div><strong>FANPULSE</strong><span>Your Voice in the Game</span></div></div><div className="header-actions"><div className="source-switch"><button className={sourceMode==='video'?'active':''} onClick={()=>{if(playing)toggle();videoNotice.current?.showModal()}}>Video</button><button className={sourceMode==='synthetic'?'active':''} onClick={()=>switchSource('synthetic')}>Synthetic match</button></div><span className="live"><i/> AI ACTIVE</span><div className="mode"><button className={mode==='casual'?'active':''} onClick={()=>setMode('casual')}>Casual</button><button className={mode==='analyst'?'active':''} onClick={()=>setMode('analyst')}>Tactical</button></div></div></header>
+    <dialog ref={videoNotice} className="video-demo-dialog" aria-labelledby="video-demo-title" aria-describedby="video-demo-description">
+      <span className="demo-eyebrow"><ShieldCheck size={18}/> HACKATHON SUBMISSION NOTICE</span>
+      <h2 id="video-demo-title">Video mode — demo only</h2>
+      <p id="video-demo-description">Video mode is an optional demonstration and is not part of this hackathon submission. Judges should exclude this mode, its real footage, and its outputs from their evaluation.</p>
+      <p>Please evaluate <strong>Synthetic match</strong>, which uses fictional match data and real Foundry agents.</p>
+      <form method="dialog"><button value="cancel" autoFocus>Cancel</button><button type="button" className="continue-demo" onClick={()=>{videoNotice.current?.close();switchSource('video')}}>Continue to video demo</button></form>
+    </dialog>
+    {sourceMode==='video'&&<section className="video-demo-notice" aria-label="Video demonstration notice"><ShieldCheck size={22}/><div><strong>DEMO ONLY · EXCLUDED FROM HACKATHON SUBMISSION</strong><p>Video mode and its outputs are provided for demonstration only and should not be considered for judging. Please evaluate Synthetic match.</p></div><button onClick={()=>switchSource('synthetic')}>Return to Synthetic match</button></section>}
     <section className="scorebar" aria-label="Match scoreboard"><div className="scoreline"><div className="team"><b className="green-crest">G</b><span>Green United</span></div><div className="score"><strong>0 <em>—</em> 0</strong></div><div className="team away"><b className="black-crest">B</b><span>Black FC</span></div></div><span className="match-meta">{time} · {sourceMode==='synthetic'?'SYNTHETIC EVENT OBSERVATIONS':'VISION-DERIVED OBSERVATIONS'}</span></section>
     <div className="layout">
       <section className="viewer">
@@ -277,7 +286,7 @@ function App(){
             ?<video ref={video} src="/media/match.mov" playsInline onLoadedMetadata={event=>{setDuration(event.currentTarget.duration);console.info('[FanPulse] video loaded',{duration:event.currentTarget.duration,width:event.currentTarget.videoWidth,height:event.currentTarget.videoHeight})}} onTimeUpdate={event=>setClock(event.currentTarget.currentTime)} onPlay={event=>{setPlaying(true);setAnalysisStatus('sampling');void postPlaybackState(true,event.currentTarget.currentTime)}} onPause={event=>{setPlaying(false);resetAnalysis(event.currentTarget.currentTime,false)}} onSeeked={event=>resetAnalysis(event.currentTarget.currentTime,!event.currentTarget.paused)} onError={()=>{setVideoMissing(true);setAnalysisStatus('video unavailable')}} />
             :syntheticMatch?<SyntheticPitch match={syntheticMatch} clock={clock}/>:<div className="placeholder"><div><Activity/><strong>{syntheticError?'MATCH DATA UNAVAILABLE':'LOADING SYNTHETIC MATCH'}</strong><p>{syntheticError??'Preparing the match timeline…'}</p></div></div>}
           {sourceMode==='video'&&videoMissing&&<div className="placeholder"><div><Radio/><strong>VIDEO UNAVAILABLE</strong><p>Add the licensed recording at <code>apps/web/public/media/match.mov</code>.</p></div></div>}
-          <div className="broadcast-badge"><CircleDot size={13}/> {sourceMode==='synthetic'?'SYNTHETIC · FIXED SEED':'VISION · REAL FRAMES'}</div>
+          <div className="broadcast-badge"><CircleDot size={13}/> {sourceMode==='synthetic'?'SYNTHETIC · FIXED SEED':'DEMO ONLY · VISION · REAL FRAMES'}</div>
           {sourceMode==='synthetic'&&syntheticHold&&<div className="synthetic-hold" role="status">{syntheticHold}</div>}
           {sourceMode==='synthetic'&&debugSynthetic&&<output className="synthetic-diagnostics">{JSON.stringify({...syntheticDiagnostics,result:latestResult?.synthetic_event?.id,poll:poll?.eventId})}</output>}
           <AnimatePresence key={currentSceneKey}>{poll&&!voted&&<motion.div className="moment-toast" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0}}><Sparkles/><div><span>AI MOMENT DETECTED</span><strong>{poll.significance}% significance</strong></div><ChevronRight/></motion.div>}</AnimatePresence>

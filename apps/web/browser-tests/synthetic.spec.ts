@@ -62,6 +62,32 @@ async function seek(page: Page, time: number) {
   }, time)
 }
 
+test('video demo requires acknowledgement and keeps its judging exclusion visible', async ({page}) => {
+  await syntheticPage(page)
+  await page.getByRole('button',{name:'Video',exact:true}).click()
+  const notice=page.getByRole('dialog',{name:'Video mode — demo only'})
+  await expect(notice).toBeVisible()
+  await expect(notice).toContainText('not part of this hackathon submission')
+  await expect(page.locator('video')).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await expect(notice).not.toBeVisible()
+  await expect(page.locator('.synthetic-stage')).toBeVisible()
+  await page.getByRole('button',{name:'Video',exact:true}).click()
+  await notice.getByRole('button',{name:'Cancel',exact:true}).click()
+  await expect(page.locator('video')).toHaveCount(0)
+  await page.getByRole('button',{name:'Video',exact:true}).click()
+  await notice.getByRole('button',{name:'Continue to video demo'}).click()
+  await expect(notice).not.toBeVisible()
+  await expect(page.locator('video')).toHaveCount(1)
+  await expect(page.getByRole('region',{name:'Video demonstration notice'})).toContainText('EXCLUDED FROM HACKATHON SUBMISSION')
+  await expect(page.locator('.broadcast-badge')).toContainText('DEMO ONLY')
+  await page.getByRole('button',{name:'Return to Synthetic match'}).click()
+  await expect(page.locator('.synthetic-stage')).toBeVisible()
+  await expect(page.locator('.video-demo-notice')).toHaveCount(0)
+  await page.getByRole('button',{name:'Video',exact:true}).click()
+  await expect(notice).toBeVisible()
+})
+
 test('delayed insight and vote stay on the held play, then clear exactly at the next phase', async ({page}, testInfo) => {
   const {submissions,enrich,errors} = await syntheticPage(page)
   await page.evaluate(() => {
