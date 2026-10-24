@@ -1,167 +1,364 @@
 # FanPulse
 
-**Your Voice in the Game.** A synchronized, agentic football viewing experience built for the Microsoft × Premier League Inside the Game Hackathon.
+**Your Voice in the Game.** FanPulse turns a synthetic football match into grounded, timely and personalised intelligence for the people watching it.
 
-FanPulse can analyse ordered frames from a local football recording with the
-deployed Foundry vision model, pass validated observations through two persisted
-Foundry agents, and deliver selective insights and polls while playback continues.
+Built for the **Microsoft × Premier League Inside the Game Hackathon**, FanPulse combines a continuously animated fictional match, two real Microsoft Foundry agents, evidence-aware publishing policy and live audience voting in one synchronized viewing experience.
 
-## Quick start
+> **Live application:** [app-fanpulse-dev-qdifh3qv.azurewebsites.net](https://app-fanpulse-dev-qdifh3qv.azurewebsites.net/)
+>
+> **Hackathon path:** Select **Synthetic** (the default). It uses fictional match data and real Foundry agents. The separate Video mode is an optional technical demonstration and is explicitly excluded from the hackathon submission and judging.
 
-Prerequisites: Node.js 20+ and Python 3.11+.
+## What FanPulse does
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-export PYTHONPYCACHEPREFIX="$PWD/.cache/python"
-pip install -r apps/api/requirements-dev.txt
-cd apps/web && npm install && cd ../..
+Traditional broadcasts give every viewer the same commentary. FanPulse treats a match moment as a piece of evidence that can be interpreted and presented differently without changing the underlying facts.
+
+- A deterministic 240-second fictional match animates all 22 players and the ball.
+- Twelve authored observations are synchronized to the action visible on the pitch.
+- The **Match Analyst** decides whether a moment is meaningful and explains why.
+- The **Fan Engagement** agent converts significant moments into concise viewer-facing copy and, when justified, a balanced poll.
+- Casual and tactical modes present the same grounded event at different levels of detail.
+- Poll votes are persisted and broadcast to connected viewers in real time.
+- Every result remains bound to its originating event and playback generation, preventing an old insight from appearing over a new play.
+
+The model is responsible for interpretation and language. It is not responsible for the match clock, player positions, ball positions, scores, vote totals or event identity.
+
+## End-to-end architecture
+
+```mermaid
+flowchart LR
+    DATA["Fictional match JSON<br/>players, ball, events"]
+    PLAYBACK["Synthetic playback<br/>one authoritative clock"]
+    PITCH["React SVG pitch<br/>continuous animation"]
+    API["FastAPI<br/>validation + orchestration"]
+    ANALYST["Foundry agent<br/>Match Analyst"]
+    ENGAGE["Foundry agent<br/>Fan Engagement"]
+    POLICY["Server policy<br/>evidence, threshold,<br/>cooldown, deduplication"]
+    STORE["Cosmos DB<br/>activity + votes"]
+    WS["WebSocket<br/>insights + vote totals"]
+    UI["Live Intelligence<br/>timeline + poll"]
+
+    DATA --> PLAYBACK
+    PLAYBACK --> PITCH
+    PLAYBACK -->|structured observation| API
+    API --> ANALYST
+    ANALYST --> ENGAGE
+    ENGAGE --> POLICY
+    POLICY --> STORE
+    POLICY --> WS
+    STORE --> WS
+    WS --> UI
 ```
 
-Sign in locally with the Azure CLI. `DefaultAzureCredential` uses this identity;
-no Foundry keys or secrets are stored in the repository:
+The React frontend and FastAPI backend are built into one deployment artifact. FastAPI serves the compiled frontend and exposes the API and WebSocket from the same Azure App Service.
 
-```bash
-az login
-az account set --subscription 49517b7e-56c6-4bd6-9b37-becfb0485544
-azd env select fanpulse-dev
+## How it works
+
+FanPulse separates deterministic match state from AI interpretation. The browser owns the animation and match clock; FastAPI validates and orchestrates each event; Foundry decides whether the moment matters and how to explain it; Cosmos DB and WebSockets make the resulting interaction durable and shared.
+
+The sequence below follows one synthetic play from movement on the pitch to a personalised insight and audience vote:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Match as Synthetic match
+    participant UI as React experience
+    participant API as FastAPI orchestrator
+    participant Analyst as Foundry Match Analyst
+    participant Engagement as Foundry Fan Engagement
+    participant DB as Cosmos DB
+
+    Match->>UI: Advance continuous player and ball tracks
+    UI->>API: Submit event ID, timestamp, observation and viewer mode
+    API-->>UI: Broadcast the event evidence
+    API->>Analyst: Request grounded significance assessment
+    Analyst-->>API: Return significance, rationale and uncertainty
+    API->>Engagement: Send observation, assessment and viewer mode
+    Engagement-->>API: Return adapted insight and optional poll
+    API->>API: Enforce evidence, threshold, cooldown and deduplication
+    API->>DB: Persist the accepted analysis activity
+    API-->>UI: Broadcast the result for the originating event
+    UI->>API: Submit one vote for this viewer
+    API->>DB: Persist the unique vote
+    API-->>UI: Broadcast updated poll totals
 ```
 
-The existing `.azure/fanpulse-dev/.env` contains non-secret resource endpoints
-and deployment names generated by `azd`. Start both processes with:
+At the event timestamp, the browser posts a validated `FootballObservation` to `/api/analysis/sessions/{session_id}/synthetic`. Synthetic mode deliberately enters the pipeline **after** the computer-vision boundary: no rendered animation frames or tracking coordinates are sent to a model. The Match Analyst and Fan Engagement calls are real Foundry agent executions.
 
-```bash
-./scripts/dev.sh
+There are no hard-coded agent answers, polls or fallback insights. If Foundry is unavailable, the UI reports the failure instead of fabricating a result.
+
+### The five-stage hackathon pipeline
+
+| Stage | FanPulse implementation |
+| --- | --- |
+| **1. Ingest** | Load a versioned fictional match containing player tracks, ball tracks and timestamped football observations. |
+| **2. Interpret** | Send the current structured observation to the Foundry Match Analyst for a grounded significance assessment. |
+| **3. Explain** | Pass the observation and assessment to the Fan Engagement agent, which produces concise copy and an optional poll. |
+| **4. Render** | Deliver the result over WebSocket and render it beside the matching action, with evidence and uncertainty visible. |
+| **5. Personalise** | Use the selected Casual or Tactical mode to control the language and depth of the generated explanation. |
+
+## The two-agent team
+
+The deployed Foundry portal assets are generated from version-controlled definitions in [`ai/agents/`](ai/agents/). Prompts live in YAML, responses are constrained by JSON Schema, and Python owns orchestration rather than embedding prompt text.
+
+| Agent | Receives | Responsibility | Structured output |
+| --- | --- | --- | --- |
+| **Match Analyst** | One validated football observation | Decide whether the visible moment is significant, provide a short summary and rationale, and state uncertainty without inventing match facts | `MatchAssessment` |
+| **Fan Engagement** | Observation, assessment and viewer mode | Publish or suppress an insight, adapt its language, and optionally create a neutral poll for sufficiently significant moments | `FanEngagementDecision` |
+
+Both agents use the `foundry-multimodal` model profile, currently mapped to a keyless `gpt-5-mini` Global Standard deployment in Microsoft Foundry. Agent definitions use minimal reasoning effort and strict token and response limits to control latency and cost.
+
+The provisioning process hashes the resolved YAML definition and JSON Schema. It creates a new immutable Foundry agent version only when that configuration has changed.
+
+## Synthetic data
+
+FanPulse was originally designed to analyse video. In that path, the browser captures an ordered window of frames from the current playback position and sends it to FastAPI. A multimodal model in Microsoft Foundry examines those frames and returns a structured `FootballObservation` describing only what it can see: the event type, team in possession, field zone, description, evidence, confidence and whether the moment appears significant.
+
+The rest of FanPulse was deliberately designed not to depend on video. It depends on that validated observation contract.
+
+For the hackathon, the video and vision stage is replaced by a fictional synthetic-data adapter. At the correct point in the simulated match, the adapter emits the **same `FootballObservation` schema that the Foundry vision path would produce**. It then enters the same downstream production pipeline:
+
+```mermaid
+flowchart LR
+    subgraph Video["Optional video proof of concept"]
+        Frames["Ordered video frames"] --> Vision["Foundry multimodal vision"]
+        Vision --> VideoObservation["Validated FootballObservation"]
+    end
+
+    subgraph Synthetic["Hackathon synthetic path"]
+        Simulation["Fictional match simulation"] --> Adapter["Synthetic observation adapter"]
+        Adapter --> SyntheticObservation["Validated FootballObservation"]
+    end
+
+    VideoObservation --> Contract["Shared observation contract"]
+    SyntheticObservation --> Contract
+    Contract --> Analyst["Foundry Match Analyst"]
+    Analyst --> Engagement["Foundry Fan Engagement"]
+    Engagement --> Policy["Shared policy and synchronization"]
+    Policy --> Experience["Insights, timeline and live voting"]
 ```
 
-Press Ctrl+C once to stop the frontend and backend. To run them separately,
-start the backend from the repository root:
+This means synthetic mode is not a recording of pre-generated Foundry answers. Only the fictional match movement and source observations are authored data. The significance assessment, personalised explanation and optional poll are generated at runtime by the real deployed Foundry agents.
 
-```bash
-source .venv/bin/activate
-export PYTHONPYCACHEPREFIX="$PWD/.cache/python"
-set -a
-source .azure/fanpulse-dev/.env
-set +a
-uvicorn apps.api.app.main:app --reload --port 8000
+| Pipeline stage | Video mode | Synthetic mode |
+| --- | --- | --- |
+| Source | Ordered JPEG frames captured from playback | Fictional player, ball and event data |
+| Observation producer | Foundry multimodal vision | Deterministic synthetic adapter |
+| Shared contract | `FootballObservation` | `FootballObservation` |
+| Match interpretation | Real Foundry Match Analyst | Same real Foundry Match Analyst |
+| Fan presentation | Real Foundry Fan Engagement agent | Same real Foundry Fan Engagement agent |
+| Delivery | Same validation, policy, WebSocket and timeline | Same validation, policy, WebSocket and timeline |
+| Voting | Same durable vote service | Same durable vote service |
+
+This boundary makes the system input-agnostic: a licensed video analyser, a tracking-data provider or a live event feed can all produce the observation contract without requiring the agent and fan-experience layers to be rebuilt. For the judged experience, FanPulse uses only the synthetic path.
+
+### Dataset and animation design
+
+The match source is [`apps/web/public/simulations/reference-match.v1.json`](apps/web/public/simulations/reference-match.v1.json). Match content is external to the rendering code and validated when loaded.
+
+It contains:
+
+- fictional team metadata and 11 players per team;
+- timestamped keyframes for every player across one continuous 240-second timeline;
+- one continuous ball track containing carries, passes and holds;
+- twelve stable events with a start time, observation time and safe hold point; and
+- the structured observation associated with each event.
+
+Coordinates use metres on a 105 × 68 metre pitch. Player movement uses shape-preserving cubic interpolation, which produces continuous motion without overshooting authored positions. Passes travel linearly so the ball does not ease unnaturally in flight. Carries attach the ball to the controlling player’s interpolated foot position.
+
+One clock drives the pitch, event labels, progress bar and Foundry submissions. A phase change never swaps to a new position track, so there is no teleport back to a play’s starting position.
+
+### Keeping animation and intelligence synchronized
+
+Foundry inference is slower and less predictable than browser animation. FanPulse handles that explicitly:
+
+1. An event is submitted only after its described action is visible.
+2. Only one synthetic agent request can be outstanding.
+3. Requests are separated by at least ten real seconds, independent of playback speed.
+4. The clock may pause at a safe hold point while the matching result completes and remains readable for at least six seconds.
+5. An 18-second waiting timeout releases playback visibly, while the outstanding request remains reserved until it actually completes.
+6. Every request and response carries the event ID and playback generation.
+7. Seeking or restarting advances the generation, causing results from the previous timeline to be discarded.
+8. The poll closes when its play changes; historical insights remain in the Match Timeline.
+
+These controls keep the visible play, Live Intelligence card and vote attached to the same event while preventing a slow model from increasing request concurrency.
+
+## Personalisation and live voting
+
+The mode selector changes the `viewer_mode` submitted with each observation:
+
+| Mode | Intended presentation |
+| --- | --- |
+| **Casual** | Accessible language, concise explanation and minimal tactical terminology |
+| **Tactical** | Deeper football context for viewers who want to understand the shape and consequence of the play |
+
+When the Fan Engagement agent returns a valid poll, FastAPI applies server-side eligibility rules before publishing it. A browser-generated viewer ID permits one vote per viewer and poll. Production votes are stored in Azure Cosmos DB and updated totals are broadcast to every connected WebSocket client. Local development uses SQLite with the same interface.
+
+## Correctness, safety and cost controls
+
+- **Strict inputs:** Pydantic rejects unknown fields, malformed observations, unordered timestamps, oversized frames and invalid JPEG payloads.
+- **Strict outputs:** Both agents return JSON matching checked-in schemas; invalid model output is not displayed.
+- **Grounding:** Prompts prohibit invented scores, identities, outcomes, statistics and tactical claims that are absent from evidence.
+- **Server policy:** Significance thresholds, evidence requirements, cooldowns and semantic duplicate keys are enforced outside the model.
+- **Generation control:** Pause, seek, reset and restart state prevent stale results from crossing playback timelines.
+- **Bounded work:** Agent and vision execution are globally single-flight; video sessions retain only the newest pending window.
+- **Explicit failure:** Provider and validation errors are surfaced. The product has no fake-success fallback path.
+- **Keyless identity:** Local development uses `DefaultAzureCredential`; Azure uses managed identity. No Foundry, Cosmos DB or Storage keys are stored in the repository.
+- **Durable voting:** Cosmos DB uses a unique vote ID per poll and viewer, preventing repeat votes.
+- **Separated deployments:** Application delivery never publishes Foundry definitions, and Foundry delivery never redeploys the application.
+
+## Optional video proof of concept
+
+Video mode demonstrates an alternative upstream input and is **not part of the hackathon submission**. The UI shows this warning before the footage is loaded and keeps a persistent exclusion banner visible in the mode.
+
+```mermaid
+flowchart LR
+    VIDEO["Licensed local video"] --> CAPTURE["Browser capture<br/>1 JPEG / second"]
+    CAPTURE --> WINDOW["Rolling ordered<br/>5-frame window"]
+    WINDOW --> VISION["Foundry multimodal vision<br/>structured observation"]
+    VISION --> AGENTS["Same Match Analyst<br/>and Fan Engagement agents"]
+    AGENTS --> UI["Same policy, WebSocket,<br/>timeline and voting UI"]
 ```
 
-`scripts/dev.sh`, the VS Code workspace, GitHub Actions, and App Service all set
-`PYTHONPYCACHEPREFIX` so generated bytecode is centralized rather than written
-beside source files. For a terminal opened outside VS Code, export it once from
-the repository root:
+The browser is authoritative for playback position. Each pause, seek or reset advances a generation and clears the frame buffer. FastAPI accepts at most one active inference and keeps only the newest pending window. Results more than 15 video seconds behind the browser position are discarded.
 
-```bash
-export PYTHONPYCACHEPREFIX="$PWD/.cache/python"
+This proves that another observation producer can be placed upstream without changing the agent, policy, persistence or presentation layers. Supply only footage for which you hold all required rights.
+
+## Technology stack
+
+| Layer | Technology | Purpose |
+| --- | --- | --- |
+| Experience | React, TypeScript, Vite, Motion, SVG | Playback controls, continuous pitch animation, insights, timeline and voting |
+| API | Python, FastAPI, Pydantic | Validation, playback sessions, orchestration, policy and WebSockets |
+| AI | Microsoft Foundry, Foundry prompt agents, `gpt-5-mini` | Vision observation, significance assessment and fan engagement |
+| Data | Azure Cosmos DB for NoSQL; SQLite locally | AI activity and one-vote-per-viewer poll persistence |
+| Hosting | Azure App Service | One deployable React/FastAPI application |
+| Infrastructure | Bicep and Azure Developer CLI | Foundry, model, App Service, Cosmos DB, Storage, identities and monitoring |
+| Identity | Microsoft Entra ID, GitHub OIDC, managed identity | Keyless developer, CI/CD and runtime access |
+| Observability | Application Insights and Log Analytics | Foundry agent traces and Azure diagnostics |
+| Delivery | GitHub Actions | CI, application deployment and independently controlled Foundry publication |
+
+## Repository layout
+
+```text
+fanpulse/
+├── apps/
+│   ├── web/                       React application and synthetic playback
+│   │   ├── public/simulations/    Versioned fictional match dataset
+│   │   ├── src/                   UI, pitch, interpolation and controller
+│   │   ├── tests/                 Deterministic motion/controller tests
+│   │   └── browser-tests/         End-to-end Chromium tests
+│   └── api/                       FastAPI application
+│       ├── app/analysis/          Queueing, agents, policy and synchronization
+│       └── tests/                 API, orchestration and storage tests
+├── ai/
+│   ├── agents/                    YAML definitions, schemas and provisioner
+│   ├── models/                    Logical model deployment profiles
+│   ├── vision/                    Multimodal frame analysis
+│   ├── evaluations/               Static evaluation definition and dataset
+│   └── tests/                     Configuration and vision tests
+├── infra/                         Bicep modules and Azure parameters
+├── docs/                          Architecture, deployment and compliance notes
+├── scripts/                       Local development and diagnostic utilities
+└── .github/workflows/             CI and separated deployment pipelines
 ```
 
-In another terminal, run the frontend:
+## API surface
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/health` | Revision, AI readiness and selected activity store |
+| `POST /api/analysis/sessions/{id}/state` | Update playback generation, position and play/pause state |
+| `POST /api/analysis/sessions/{id}/synthetic` | Submit an event-bound fictional observation to the two-agent pipeline |
+| `POST /api/analysis/sessions/{id}/windows` | Submit an ordered browser-frame window to the optional vision pipeline |
+| `GET /api/polls/{poll_id}/results` | Read current poll totals |
+| `POST /api/votes` | Cast one viewer vote and broadcast the updated totals |
+| `WS /ws` | Receive analysis status, insights, polls and vote updates |
+
+## Test and validate
+
+The normal validation path does not call paid Foundry inference.
+
+```bash
+# Python API, storage, AI configuration and vision tests
+python -m pytest apps/api/tests ai/tests -q
+
+# Validate declarative model/agent/evaluation files without publishing
+python -m ai.provision
+
+# React lint, deterministic playback tests, production build and browser tests
+cd apps/web
+npm run lint
+npm test
+npm run build
+npm run test:browser
+
+# Compile the Azure infrastructure template
+cd ../..
+az bicep build --file infra/main.bicep --stdout >/dev/null
+```
+
+Synthetic tests inspect the entire match at 60 fps, position and velocity boundaries, ball control, event evidence, delayed responses, request rate at multiple playback speeds, voting, pause, seek and restart behavior. Browser tests intercept transport only inside Playwright; those fixtures cannot become a product fallback.
+
+An optional manual smoke test sends at most two synthetic observations through the real deployed Foundry agents:
 
 ```bash
 cd apps/web
-npm run dev
+node scripts/synthetic-foundry-smoke.mjs
 ```
 
-Open http://localhost:5173 and click **Play with vision**, or select **Synthetic
-match** to play the fictional scenario. If the API, video, or Foundry configuration is unavailable,
-the UI reports that condition instead of fabricating observations. Analysis and
-multi-user voting require the backend.
+## Evaluation
 
-The terminal logs each playback update, submitted frame window, video timestamp,
-vision duration, agent duration, WebSocket delivery, error, and total latency.
-The browser console logs video playback, frame submission, WebSocket messages,
-and vote results.
+[`ai/evaluations/`](ai/evaluations/) contains a six-case static dataset captured from representative pipeline outputs and a version-controlled Foundry evaluation definition. It measures grounded observation quality and poll decisions without replaying the video path.
 
-## Add your video
+Real evaluation is intentionally manual because it invokes billable inference. The protected **Deploy Foundry solution** workflow publishes changed agent/evaluation definitions, runs the evaluation and uploads its report.
 
-The current local recording is loaded from `apps/web/public/media/match.mov`. See [the media instructions](apps/web/public/media/README.md). The synchronization offset can be adjusted in the UI. Do not commit or redistribute footage unless you hold all required rights.
+## Delivery and deployment
 
-## Architecture
+FanPulse separates changes by responsibility:
 
-```text
-apps/web ──HTTP/WebSocket──► apps/api ──server-side──► ai/vision
-                                │                         │
-                                └── policy/voting         ▼
-                                                  ai/agents
-```
+| Workflow or command | Responsibility | Trigger |
+| --- | --- | --- |
+| **Continuous integration** | Validate Foundry configuration, run Python and web tests, build React, run Playwright, compile Bicep | Pull requests and pushes to `main` |
+| **Deploy web application** | Build and deploy the tested React/FastAPI artifact to Azure App Service | Manual, `main` only |
+| **Deploy Foundry solution** | Publish changed immutable agent versions and evaluation definition, then run the static evaluation | Manual, `main` only |
+| `azd provision` | Create or update Azure resources, identities, RBAC and model deployment | Explicit local operation after reviewing `what-if` |
 
-- `apps/web/`: React, TypeScript, Vite, Motion and Lucide user interface.
-- `apps/api/`: FastAPI, durable activity/voting storage, WebSocket broadcasts and playback orchestration.
-- `ai/agents/`: version-controlled Foundry prompts, schemas, provider and provisioner.
-- `ai/vision/`: frame extraction and multimodal Foundry vision integration.
-- `ai/models/`: declarative model profiles, capabilities and inference defaults.
-- `ai/evaluations/`: explicit real-service pipeline evaluation utilities.
-- `docs/`: architecture, agent contracts, and compliance notes.
+GitHub Actions signs into Azure using workload identity federation. No client secret, publish profile or storage key is required. Application deployment does not invoke Foundry or alter agent versions. See [`docs/GITHUB_DEPLOYMENT.md`](docs/GITHUB_DEPLOYMENT.md) for setup and rollback.
 
-The live pipeline uses Foundry vision followed by the persisted
-`fanpulse-match-analyst` and `fanpulse-fan-engagement` agents.
-Their definitions, output contracts, runtime pipeline, and idempotent provisioner
-are version-controlled in [`ai/agents/`](ai/agents/README.md).
+## Azure infrastructure
 
-## Playback controls
+The Bicep modules provision:
 
-- Use **Play with vision** to start playback and live frame analysis.
-- Select **Synthetic match** to render continuous player/ball tracks from an
-  external JSON file and send the corresponding observations to real Foundry agents.
-- Pause or seek freely; playback generations prevent stale results appearing.
-- Use **Reset** to clear the client timeline and reset the backend match session.
-- Open two browser windows with different generated viewer IDs to demonstrate genuine shared voting.
+- Microsoft Foundry account and project in Australia East;
+- `gpt-5-mini` Global Standard deployment;
+- the Foundry project and model used by two separately versioned prompt agents;
+- Azure App Service with a system-assigned managed identity;
+- serverless Azure Cosmos DB for activity and votes;
+- private Azure Blob Storage for optional licensed video;
+- Application Insights and a 30-day Log Analytics workspace; and
+- least-privilege Entra role assignments for developers, runtime identities and GitHub OIDC.
 
-See [synthetic match data and synchronization](docs/SYNTHETIC_MATCH.md) for the
-editable scenario file, motion model, request limits and playback tests.
-
-## Foundry vision proof of concept
-
-After the approved model deployment has been provisioned, run a five-frame analysis of the licensed local recording using the persistent `azd` outputs:
+Validate infrastructure changes before applying them:
 
 ```bash
-FOUNDRY_PROJECT_ENDPOINT="$(azd env get-value FOUNDRY_PROJECT_ENDPOINT)" \
-FOUNDRY_VISION_MODEL_DEPLOYMENT="$(azd env get-value FOUNDRY_VISION_MODEL_DEPLOYMENT)" \
-.venv/bin/python -m ai.vision.poc --start 30 --count 5 --interval 1
+az bicep build --file infra/main.bicep
+az deployment group what-if \
+  --resource-group rg-fanpulse-dev \
+  --template-file infra/main.bicep \
+  --parameters infra/main.parameters.json
 ```
 
-The utility sends resized, compressed sequential frames and prints only timestamps, sizes, latency, token usage, and Pydantic-validated observations. It does not upload the video or save extracted frames.
+Then provision explicitly with `azd provision`. Application and Foundry workflows never run `azd up`.
 
-The first real-video test (timestamps 30–34 seconds) completed in 7.601 seconds
-and correctly described a sideline throw-in preparation and player repositioning.
-See [the architecture notes](docs/ARCHITECTURE.md) for the measured token usage,
-limitations, and the boundary between this proof of concept and later streaming
-work.
+## Foundry configuration lifecycle
 
-## Local Phase 5 workflow
+Validate definitions locally without contacting Azure:
 
-Start the backend and frontend as above and play the recording. The browser
-captures one compressed frame per video second and submits
-ordered five-frame windows. Playback never waits for inference. Pausing or
-seeking advances a playback generation so stale responses are discarded; while
-inference is busy, only the newest pending window is retained.
+```bash
+python -m ai.provision
+```
 
-The backend sends validated observations to `fanpulse-match-analyst`, which
-assesses football significance. Significant observations are handed to
-`fanpulse-fan-engagement`, which creates the fan insight and optional poll.
-Every current result—including a routine/suppressed one—is sent to the UI with
-its evidence and policy reason. Backend policy independently enforces evidence,
-significance, cooldown, and duplicate-key rules.
-
-To verify the local integration:
-
-1. Check http://localhost:8000/api/health returns
-   `"vision_analysis_ready": true`.
-2. Open http://localhost:5173 and confirm the video is available.
-3. Press **Play with vision** and leave the recording playing long enough for a
-   five-frame window plus Foundry inference.
-4. Confirm `frames_submitted`, `vision_complete`, `agent_complete`,
-   `websocket_delivery`, and `analysis_complete` appear in the backend terminal.
-5. The observation card always explains what vision saw and the policy outcome.
-   A grounded insight appears only when vision and Match Analyst consider the
-   sequence meaningful; Fan Engagement then creates the copy and optional poll.
-   If a poll appears, select an option and confirm its live count updates.
-
-Foundry model and agent calls are billable. At most one inference runs at a time,
-and only the newest pending window is retained to control cost and lag.
-
-Create or version both agents and the Foundry evaluation definition after their
-checked-in definitions change:
+After changing a model profile, provision the Bicep-managed deployment first. After changing an agent prompt or schema, publish through the protected Foundry workflow. For controlled local recovery only:
 
 ```bash
 source .venv/bin/activate
@@ -172,29 +369,35 @@ set +a
 python -m ai.provision --apply
 ```
 
-Run the six-case static Foundry evaluation manually with:
+Publishing is idempotent when the latest Foundry version already matches the checked-in configuration hash. A reverted definition becomes a new immutable version, making rollback explicit and auditable.
 
-```bash
-python -m ai.evaluations.runner --run
-```
+## Limitations and production path
 
-The checked-in JSONL dataset contains representative outputs captured from the
-real FanPulse video pipeline. The evaluation measures grounded observation
-quality and correct poll decisions without replaying the video or making vision
-and agent calls. It appears in the Foundry **Evaluation** screen. The **Deploy
-Foundry solution** GitHub workflow publishes its definition and runs the static
-dataset automatically.
+- The synthetic scenario is one authored reference match rather than a match generator.
+- Observations are authored alongside the fictional animation; computer vision is bypassed in the submission path.
+- Viewer modes change language depth, not which events a viewer is allowed to receive.
+- WebSocket broadcasts are currently process-local; a horizontally scaled deployment would need a shared backplane.
+- Session orchestration is held in process memory, while accepted activity and votes are durable.
+- Production exposure beyond the judged demo would require authentication, per-user authorization, rate limits and broader load testing.
 
-## Delivery
+These boundaries are intentional and visible. FanPulse demonstrates a complete, working path from synthetic football evidence to real agent interpretation, synchronized presentation and audience participation without claiming that the reference match is live tracking data.
 
-GitHub Actions validates pull requests, deploys a commit-specific React/FastAPI
-artifact to App Service, and publishes declarative Foundry agent versions through
-a separate protected workflow. Both use Azure OIDC. Infrastructure remains an
-explicit `azd provision` operation. See
-[GitHub application delivery](docs/GITHUB_DEPLOYMENT.md) for the trust setup,
-environment variables, private-video upload, manual releases, and rollback process.
+## Hackathon compliance
 
-## Rules checklist
+- The judged Synthetic mode uses fictional teams, players, coordinates and observations.
+- Video mode and its outputs are visibly marked as an excluded technical demonstration.
+- No match footage is committed to the repository.
+- AI-generated observations and insights are labelled in the interface.
+- The demo video must remain under two minutes and avoid unlicensed footage, music and trademarks.
+- The public application and repository must remain freely accessible through the judging period.
 
-Supply only footage and audio for which you have permission, and label AI-generated observations clearly. The final submission also needs a public GitHub repository, a free judge-accessible working build, an English project description/testing instructions, and a public demo video under two minutes.
+See [`docs/COMPLIANCE.md`](docs/COMPLIANCE.md) for the engineering checklist and re-check the [official rules](https://github.com/microsoft/insidethegamehackathon/blob/main/OFFICIAL%20RULES.md) before submission.
 
+## Further documentation
+
+- [`docs/SYNTHETIC_MATCH.md`](docs/SYNTHETIC_MATCH.md) — match schema, interpolation and synchronization behavior
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — vision path, runtime policy and agent contracts
+- [`ai/agents/README.md`](ai/agents/README.md) — declarative agent definitions and publication
+- [`ai/evaluations/README.md`](ai/evaluations/README.md) — evaluation dataset and runner
+- [`infra/README.md`](infra/README.md) — Azure resources, identities and provisioning
+- [`docs/GITHUB_DEPLOYMENT.md`](docs/GITHUB_DEPLOYMENT.md) — CI/CD, OIDC, delivery and rollback
