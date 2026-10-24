@@ -102,19 +102,19 @@ sequenceDiagram
     participant API as FastAPI orchestrator
     participant Analyst as Foundry Match Analyst Agent
     participant Engagement as Foundry Fan Engagement Agent
-    participant Model as Foundry gpt-5-mini
+    participant Model as Foundry gpt-5-mini deployment
     participant DB as Cosmos DB
 
     Match->>UI: Advance continuous player and ball tracks
     UI->>API: Submit event ID, timestamp, observation and viewer mode
     API-->>UI: Broadcast the event evidence
     API->>Analyst: Request grounded significance assessment
-    Analyst->>Model: Run grounded assessment prompt
+    Analyst->>Model: Execute persisted agent on gpt-5-mini
     Model-->>Analyst: Return schema-constrained assessment
     Analyst-->>API: Return significant flag, score, rationale and uncertainty
     alt Match Analyst marks the moment significant
         API->>Engagement: Send observation, assessment and viewer mode
-        Engagement->>Model: Run fan engagement prompt
+        Engagement->>Model: Execute persisted agent on gpt-5-mini
         Model-->>Engagement: Return schema-constrained decision
         Engagement-->>API: Return publish decision, adapted insight and optional poll
         API->>API: Require source significance and non-low confidence
