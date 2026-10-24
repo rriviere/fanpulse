@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { Activity, Bot, ChevronRight, CircleDot, Gauge, Pause, Play, Radio, RefreshCw, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import type { Counts, MatchEvent, Poll, SourceMode, ViewerMode, VisionResultMessage } from './types'
 import {SyntheticPitch} from './SyntheticPitch'
-import {SYNTHETIC_DURATION,SYNTHETIC_EVENTS} from './syntheticMatch'
+import {eventAt,SYNTHETIC_AGENT_TIMEOUT_MS,SYNTHETIC_DURATION,SYNTHETIC_EVENTS,SYNTHETIC_RESULT_HOLD_MS} from './syntheticMatch'
 
 const ANALYSIS_INTERVAL_SECONDS=10
 const POLL_SIGNIFICANCE_THRESHOLD=60
@@ -13,6 +13,7 @@ const viewerId=localStorage.getItem('fanpulse-viewer-id') || crypto.randomUUID()
 localStorage.setItem('fanpulse-viewer-id',viewerId)
 const analysisSessionId=sessionStorage.getItem('fanpulse-analysis-session') || crypto.randomUUID()
 sessionStorage.setItem('fanpulse-analysis-session',analysisSessionId)
+type SyntheticSync={eventId:string;eventLabel:string;eventTime:number;submittedAt:number;resultAt:number|null;released:boolean}
 
 function App(){
   const video=useRef<HTMLVideoElement>(null)
@@ -26,13 +27,26 @@ function App(){
   const [latestResult,setLatestResult]=useState<VisionResultMessage|null>(null)
   const generation=useRef(0), frameBuffer=useRef<{timestamp_seconds:number;data_url:string}[]>([])
   const nextSampleAt=useRef(0), lastWindowEnd=useRef(-1), lastStateSecond=useRef(-1), pollId=useRef<string|null>(null)
-  const animationFrame=useRef(0), syntheticStartedAt=useRef(0), syntheticStartClock=useRef(0), clockRef=useRef(0), submittedEvents=useRef(new Set<number>())
+  const animationFrame=useRef(0), syntheticStartedAt=useRef(0), syntheticStartClock=useRef(0), clockRef=useRef(0), submittedEvents=useRef(new Set<string>()), syntheticSync=useRef<SyntheticSync|null>(null)
 
   const applyVisionResult=useCallback((message:VisionResultMessage)=>{
-    const id=`vision-${message.generation}-${message.window.end_seconds}`
+    const syntheticEvent=message.synthetic_event??null
+    if(syntheticEvent&&syntheticSync.current?.eventId!==syntheticEvent.id){
+      console.info('[FanPulse] synthetic result discarded',{event:syntheticEvent.id,active:syntheticSync.current?.eventId})
+      return
+    }
+    const id=syntheticEvent?`synthetic-${message.generation}-${syntheticEvent.id}`:`vision-${message.generation}-${message.window.end_seconds}`
     if(!['vision-direct','synthetic-direct'].includes(message.provider.agent)){
+      if(syntheticEvent){
+        if(syntheticSync.current&&!syntheticSync.current.resultAt)syntheticSync.current.resultAt=performance.now()
+        setLatestResult(message);setAnalysisLatency(message.latency.total_ms);setAnalysisStatus('published')
+        if(message.insight.publish_insight){
+          const event:MatchEvent={id,matchSecond:Math.round(syntheticEvent.timestamp_seconds),videoSecond:syntheticEvent.timestamp_seconds,type:message.observation.event_type,title:message.insight.headline,detail:message.insight.explanation,candidate:message.insight.significance>=POLL_SIGNIFICANCE_THRESHOLD}
+          setTimeline(previous=>[event,...previous.filter(item=>item.id!==id)].slice(0,7))
+        }
+      }
       if(message.insight.publish_insight&&message.insight.significance>=POLL_SIGNIFICANCE_THRESHOLD&&message.insight.poll){
-        setPoll({id:`poll-${id}`,eventId:id,question:message.insight.poll.question,options:message.insight.poll.options,significance:message.insight.significance,reason:message.insight.explanation,agentTrace:[`Vision model · ${message.latency.vision_ms}ms`,`Match Analyst · ${message.latency.match_analyst_ms}ms`,`Fan Engagement · ${message.latency.fan_engagement_ms}ms`,'Policy · 60+ significance and dedup passed',`WebSocket · delivered · ${message.latency.total_ms}ms`],expiresAt:Date.now()+POLL_VOTING_SECONDS*1000});setPollClock(Date.now());setVoted(null);setCounts({})
+        setPoll({id:`poll-${id}`,eventId:id,eventLabel:syntheticEvent?.label,eventTimestamp:syntheticEvent?.timestamp_seconds,question:message.insight.poll.question,options:message.insight.poll.options,significance:message.insight.significance,reason:message.insight.explanation,agentTrace:[`${syntheticEvent?'Synthetic event adapter':'Vision model'} · ${message.latency.vision_ms}ms`,`Match Analyst · ${message.latency.match_analyst_ms}ms`,`Fan Engagement · ${message.latency.fan_engagement_ms}ms`,'Policy · 60+ significance and dedup passed',`WebSocket · delivered · ${message.latency.total_ms}ms`],expiresAt:Date.now()+POLL_VOTING_SECONDS*1000});setPollClock(Date.now());setVoted(null);setCounts({})
       }
       return
     }
@@ -130,16 +144,31 @@ function App(){
     if(sourceMode!=='synthetic'||!playing)return
     syntheticStartedAt.current=performance.now();syntheticStartClock.current=clockRef.current
     const tick=(now:number)=>{
-      const next=Math.min(SYNTHETIC_DURATION,syntheticStartClock.current+(now-syntheticStartedAt.current)/1000*rate)
+      let next=Math.min(SYNTHETIC_DURATION,syntheticStartClock.current+(now-syntheticStartedAt.current)/1000*rate)
+      const sync=syntheticSync.current
+      if(sync&&!sync.released){
+        const following=SYNTHETIC_EVENTS.find(item=>item.time>sync.eventTime)
+        const holdAt=Math.min(sync.eventTime+10,(following?.time??SYNTHETIC_DURATION)-1)
+        const resultShown=sync.resultAt!==null&&now-sync.resultAt>=SYNTHETIC_RESULT_HOLD_MS
+        const timedOut=now-sync.submittedAt>=SYNTHETIC_AGENT_TIMEOUT_MS
+        if(resultShown||timedOut){
+          sync.released=true
+          if(timedOut&&!sync.resultAt)setAnalysisStatus('agent timeout · continuing')
+        }else if(next>=holdAt){
+          next=holdAt;syntheticStartClock.current=holdAt;syntheticStartedAt.current=now
+          if(!sync.resultAt)setAnalysisStatus('awaiting Foundry agents')
+        }
+      }
       setClock(next)
       const second=Math.floor(next)
       if(second!==lastStateSecond.current){lastStateSecond.current=second;void postPlaybackState(true,next)}
       for(const item of SYNTHETIC_EVENTS){
-        if(next>=item.time&&!submittedEvents.current.has(item.time)){
-          submittedEvents.current.add(item.time);setAnalysisStatus('queued')
-          void fetch(`/api/analysis/sessions/${analysisSessionId}/synthetic`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:generation.current,viewer_mode:mode,observation:item.observation})})
+        if(next>=item.time&&!submittedEvents.current.has(item.id)){
+          submittedEvents.current.add(item.id);syntheticSync.current={eventId:item.id,eventLabel:item.label,eventTime:item.time,submittedAt:now,resultAt:null,released:false};setAnalysisStatus('queued')
+          void fetch(`/api/analysis/sessions/${analysisSessionId}/synthetic`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:generation.current,viewer_mode:mode,event_id:item.id,event_label:item.label,observation:item.observation})})
             .then(async response=>{if(!response.ok)throw new Error(`synthetic event rejected (${response.status}): ${await response.text()}`)})
             .catch(error=>{console.error('[FanPulse] synthetic submission error',error);setAnalysisStatus('offline')})
+          break
         }
       }
       if(next>=SYNTHETIC_DURATION){setPlaying(false);void postPlaybackState(false,next);return}
@@ -161,10 +190,15 @@ function App(){
 
   function reset(){
     video.current?.pause();if(video.current)video.current.currentTime=0
-    submittedEvents.current.clear();setClock(0);setPlaying(false);setTimeline([]);setPoll(null);setLatestResult(null);setVoted(null);setCounts({});resetAnalysis(0,false)
+    submittedEvents.current.clear();syntheticSync.current=null;setClock(0);setPlaying(false);setTimeline([]);setPoll(null);setLatestResult(null);setVoted(null);setCounts({});resetAnalysis(0,false)
   }
   function toggle(){
-    if(sourceMode==='synthetic'){const next=!playing;setPlaying(next);setAnalysisStatus(next?'sampling':'paused');void postPlaybackState(next,clock);return}
+    if(sourceMode==='synthetic'){
+      if(playing){
+        const active=eventAt(clock);submittedEvents.current=new Set(SYNTHETIC_EVENTS.filter(item=>!active||item.time<active.time).map(item=>item.id));syntheticSync.current=null;setPlaying(false);resetAnalysis(clock,false)
+      }else{setPlaying(true);setAnalysisStatus('sampling');void postPlaybackState(true,clock)}
+      return
+    }
     if(!videoMissing&&video.current){if(video.current.paused)void video.current.play();else video.current.pause()}
   }
   function switchSource(next:SourceMode){if(next===sourceMode)return;video.current?.pause();setSourceMode(next);setDuration(next==='synthetic'?SYNTHETIC_DURATION:video.current?.duration||0);reset()}
@@ -184,7 +218,7 @@ function App(){
           {sourceMode==='video'&&videoMissing&&<div className="placeholder"><div><Radio/><strong>VIDEO UNAVAILABLE</strong><p>Add the licensed recording at <code>apps/web/public/media/match.mov</code>.</p></div></div>}
           <div className="broadcast-badge"><CircleDot size={13}/> {sourceMode==='synthetic'?'SYNTHETIC · FIXED SEED':'VISION · REAL FRAMES'}</div>
           <AnimatePresence>{poll&&!voted&&<motion.div className="moment-toast" initial={{opacity:0,y:20}} animate={{opacity:1,y:0}} exit={{opacity:0}}><Sparkles/><div><span>AI MOMENT DETECTED</span><strong>{poll.significance}% significance</strong></div><ChevronRight/></motion.div>}</AnimatePresence>
-          <div className="controls"><button onClick={toggle} disabled={sourceMode==='video'&&videoMissing}>{playing?<Pause/>:<Play/>}</button><div className="progress"><input aria-label="Match position" type="range" min="0" max={duration||1} value={clock} disabled={sourceMode==='video'&&videoMissing} onChange={event=>{const position=+event.target.value;setClock(position);clockRef.current=position;syntheticStartClock.current=position;syntheticStartedAt.current=performance.now();submittedEvents.current=new Set(SYNTHETIC_EVENTS.filter(item=>item.time<position).map(item=>item.time));if(video.current)video.current.currentTime=position;resetAnalysis(position,playing)}}/><span style={{width:`${duration?clock/duration*100:0}%`}}/></div><span>{time}</span><button className="rate" onClick={()=>{const next=rate===4?1:rate*2;setRate(next);if(video.current)video.current.playbackRate=next}}>{rate}×</button></div>
+          <div className="controls"><button onClick={toggle} disabled={sourceMode==='video'&&videoMissing}>{playing?<Pause/>:<Play/>}</button><div className="progress"><input aria-label="Match position" type="range" min="0" max={duration||1} value={clock} disabled={sourceMode==='video'&&videoMissing} onChange={event=>{const position=+event.target.value,active=eventAt(position);setClock(position);clockRef.current=position;syntheticStartClock.current=position;syntheticStartedAt.current=performance.now();submittedEvents.current=new Set(SYNTHETIC_EVENTS.filter(item=>sourceMode==='synthetic'&&active?item.time<active.time:item.time<position).map(item=>item.id));syntheticSync.current=null;if(video.current)video.current.currentTime=position;resetAnalysis(position,playing)}}/><span style={{width:`${duration?clock/duration*100:0}%`}}/></div><span>{time}</span><button className="rate" onClick={()=>{const next=rate===4?1:rate*2;setRate(next);if(video.current)video.current.playbackRate=next}}>{rate}×</button></div>
         </div>
         <div className="under-video"><div><button className="primary" onClick={toggle} disabled={sourceMode==='video'&&videoMissing}>{playing?<><Pause/> Pause match</>:<><Play/> {sourceMode==='synthetic'?'Play synthetic match':'Play with vision'}</>}</button><button onClick={reset}><RefreshCw/> Restart</button></div></div>
         <Timeline items={timeline} sourceMode={sourceMode}/>
@@ -202,9 +236,10 @@ function App(){
 }
 
 function PollCard({poll,counts,total,voted,secondsRemaining,vote}:{poll:Poll;counts:Counts;total:number;voted:string|null;secondsRemaining:number;vote:(id:string)=>void}){
-  return <motion.div className="poll-card significant-poll" initial={{opacity:0,y:24,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:10,scale:.98}} transition={{type:'spring',stiffness:260,damping:22}}><div className="poll-glow" aria-hidden="true"/><div className="signal"><span className="signal-icon"><Sparkles/></span><span>SIGNIFICANT MOMENT · FAN VOTE</span></div><div className={voted?'poll-timer voted':'poll-timer'}><span>{voted?'VOTE SUBMITTED':'VOTING CLOSES IN'}</span><strong>{voted?'✓':`${secondsRemaining}s`}</strong></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
+  const origin=poll.eventTimestamp===undefined?null:`${Math.floor(poll.eventTimestamp/60).toString().padStart(2,'0')}:${Math.floor(poll.eventTimestamp%60).toString().padStart(2,'0')} · ${poll.eventLabel}`
+  return <motion.div className="poll-card significant-poll" initial={{opacity:0,y:24,scale:.96}} animate={{opacity:1,y:0,scale:1}} exit={{opacity:0,y:10,scale:.98}} transition={{type:'spring',stiffness:260,damping:22}}><div className="poll-glow" aria-hidden="true"/><div className="signal"><span className="signal-icon"><Sparkles/></span><span>SIGNIFICANT MOMENT · FAN VOTE</span></div>{origin&&<div className="poll-origin">{origin}</div>}<div className={voted?'poll-timer voted':'poll-timer'}><span>{voted?'VOTE SUBMITTED':'VOTING CLOSES IN'}</span><strong>{voted?'✓':`${secondsRemaining}s`}</strong></div><h3>{poll.question}</h3><p className="reason">{poll.reason}</p><div className="options">{poll.options.map(option=>{const count=counts[option.id]||0,pct=total?Math.round(count/total*100):0;return <button disabled={!!voted} className={voted===option.id?'selected':''} onClick={()=>vote(option.id)} key={option.id}><span className="fill" style={{width:voted?`${pct}%`:'0'}}/><span>{option.label}</span>{voted&&<b>{pct}%</b>}</button>})}</div><div className="vote-meta"><span><Users/> {total} live {total===1?'vote':'votes'}</span><span>One vote per viewer</span></div></motion.div>
 }
 function EmptyState(){return <motion.div className="empty" initial={{opacity:0}} animate={{opacity:1}}><div><Gauge/><i/></div><h3>Watching the match</h3><p>Foundry vision, Match Analyst, and Fan Engagement are looking for grounded, meaningful moments. Routine play is shown with its reason instead of becoming a poll.</p></motion.div>}
-function ObservationCard({result}:{result:VisionResultMessage}){const synthetic=result.provider.agent==='synthetic-direct';return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className="observation-state published"><Activity/><span>INSIGHT PUBLISHED</span><b className={`confidence-level ${result.observation.confidence}`}>{result.observation.confidence.toUpperCase()} CONFIDENCE</b></div><h3>{result.observation.description}</h3><p>{result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>{synthetic?'Synthetic observation adapter':'Vision direct'}</dd></div></dl></motion.div>}
+function ObservationCard({result}:{result:VisionResultMessage}){const synthetic=result.provider.vision_model==='synthetic-observation-adapter',direct=['vision-direct','synthetic-direct'].includes(result.provider.agent),published=result.policy.outcome==='published',origin=result.synthetic_event;return <motion.div className="observation-card" initial={{opacity:0,x:18}} animate={{opacity:1,x:0}}><div className={`observation-state ${published?'published':'suppressed'}`}><Activity/><span>{direct?'MOMENT DETECTED':published?'INSIGHT PUBLISHED':'MOMENT ASSESSED'}</span><b className={`confidence-level ${result.observation.confidence}`}>{result.observation.confidence.toUpperCase()} CONFIDENCE</b></div>{origin&&<small className="insight-origin">{Math.floor(origin.timestamp_seconds/60).toString().padStart(2,'0')}:{Math.floor(origin.timestamp_seconds%60).toString().padStart(2,'0')} · {origin.label}</small>}<h3>{result.observation.description}</h3><p>{result.observation.evidence}</p><dl><div><dt>Visible event</dt><dd>{result.observation.event_type.replaceAll('_',' ')}</dd></div><div><dt>Evidence</dt><dd>{result.observation.confidence} confidence · {result.observation.evidence_basis.replaceAll('_',' ')}</dd></div><div><dt>Decision</dt><dd>{direct?(synthetic?'Awaiting Foundry agents':'Vision direct'):published?'Foundry agents · published':'Foundry agents · suppressed'}</dd></div></dl></motion.div>}
 function Timeline({items,sourceMode}:{items:MatchEvent[];sourceMode:SourceMode}){return <section className="timeline"><div className="timeline-title"><span>Match timeline</span><small>{sourceMode==='synthetic'?'SYNTHETIC EVENT OBSERVATIONS':'VISION OBSERVATIONS'}</small></div><div className="event-list">{items.length?items.map(event=><motion.div initial={{opacity:0}} animate={{opacity:1}} className="event" key={event.id}><time>{Math.floor(event.matchSecond/60).toString().padStart(2,'0')}:{(event.matchSecond%60).toString().padStart(2,'0')}</time><i className={event.candidate?'hot':''}/><div><strong>{event.title}</strong><span>{event.detail}</span></div></motion.div>):<p className="waiting">Play the {sourceMode==='synthetic'?'synthetic match':'video'} to begin Foundry analysis.</p>}</div></section>}
 export default App

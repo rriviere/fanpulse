@@ -143,6 +143,8 @@ class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
         payload = SyntheticObservationSubmission(
             generation=2,
             viewer_mode="analyst",
+            event_id="green-pressure",
+            event_label="Green pressure",
             observation=observation(31),
         )
         first = await manager.submit_synthetic("synthetic", payload)
@@ -152,12 +154,21 @@ class AnalysisManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.status, "queued")
         self.assertEqual(duplicate.reason, "duplicate_window")
         self.assertEqual(vision.calls, [])
-        self.assertTrue(any(
-            message.get("provider", {}).get("agent") == "synthetic-direct" for message in messages
-        ))
+        direct = next(
+            message for message in messages
+            if message.get("provider", {}).get("agent") == "synthetic-direct"
+        )
+        self.assertEqual(direct["policy"]["reason"], "synthetic_direct")
+        self.assertEqual(direct["synthetic_event"]["id"], "green-pressure")
         self.assertTrue(any(
             message.get("provider", {}).get("agent") == "mock-agent" for message in messages
         ))
+        enriched = next(message for message in messages if message.get("provider", {}).get("agent") == "mock-agent")
+        self.assertEqual(enriched["synthetic_event"], {
+            "id": "green-pressure",
+            "label": "Green pressure",
+            "timestamp_seconds": 31.0,
+        })
         await manager.close()
 
     async def test_rate_limited_window_is_skipped_and_next_window_continues(self):

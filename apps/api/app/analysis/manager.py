@@ -53,6 +53,7 @@ class AgentWork:
     observation: FootballObservation
     vision_result: VisionInference
     started: float
+    synthetic_event: dict[str, Any] | None = None
 
 
 class AnalysisManager:
@@ -140,6 +141,11 @@ class AnalysisManager:
         state = self.sessions.setdefault(session_id, SessionState())
         observation = submission.observation
         timestamp = observation.video_timestamp_seconds
+        synthetic_event = {
+            "id": submission.event_id,
+            "label": submission.event_label,
+            "timestamp_seconds": timestamp,
+        }
         if not state.playing or submission.generation != state.generation:
             return SubmissionResult(status="ignored", reason="stale_or_paused")
         if timestamp <= state.last_accepted_end:
@@ -167,11 +173,11 @@ class AnalysisManager:
         )
         await self._deliver_result(
             session_id, submission.generation, timestamp, timestamp, observation,
-            synthetic_result, direct_result, started,
+            synthetic_result, direct_result, started, synthetic_event,
         )
         state.pending_agent = AgentWork(
             submission.generation, submission.viewer_mode, timestamp, timestamp,
-            observation, synthetic_result, started,
+            observation, synthetic_result, started, synthetic_event,
         )
         if state.agent_worker is None or state.agent_worker.done():
             state.agent_worker = asyncio.create_task(self._run_agents(session_id, state))
@@ -319,6 +325,7 @@ class AnalysisManager:
                         work.vision_result,
                         agent_result,
                         work.started,
+                        work.synthetic_event,
                     )
                 except asyncio.CancelledError:
                     raise
@@ -356,6 +363,7 @@ class AnalysisManager:
         vision_result: VisionInference,
         agent_result: AgentInference,
         started: float,
+        synthetic_event: dict[str, Any] | None = None,
     ):
         decision = self._apply_policy(state=self.sessions[session_id], observation=observation,
                                       decision=agent_result.decision)
@@ -363,8 +371,8 @@ class AnalysisManager:
             policy_reason = "vision_not_significant"
         elif observation.confidence == "low":
             policy_reason = "vision_low_confidence"
-        elif agent_result.agent_name == "vision-direct":
-            policy_reason = "vision_direct"
+        elif agent_result.agent_name in {"vision-direct", "synthetic-direct"}:
+            policy_reason = "synthetic_direct" if synthetic_event else "vision_direct"
         elif not decision.publish_insight:
             policy_reason = (
                 "match_analyst_routine"
@@ -405,6 +413,7 @@ class AnalysisManager:
                 "agents": agent_result.agents,
                 "retried_stages": agent_result.retried_stages,
             },
+            "synthetic_event": synthetic_event,
         }
         if self.activity:
             try:

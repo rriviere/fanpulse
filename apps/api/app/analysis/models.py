@@ -66,6 +66,8 @@ class SyntheticObservationSubmission(BaseModel):
 
     generation: int = Field(ge=0)
     viewer_mode: Literal["casual", "analyst"] = "casual"
+    event_id: str = Field(min_length=3, max_length=80, pattern=r"^[a-z0-9-]+$")
+    event_label: str = Field(min_length=3, max_length=100)
     observation: FootballObservation
 
 

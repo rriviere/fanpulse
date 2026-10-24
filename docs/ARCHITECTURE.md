@@ -107,17 +107,27 @@ contains immutable deployed versions created from those definitions.
 
 ### Synthetic match input
 
-Synthetic Match Mode adds a deterministic, fictional 135-second SVG replay. Its
-single timeline drives all 22 player positions, the ball, clock, and nine
-validated `FootballObservation` events. The selected event types and ordering
-mirror a persisted vision-analysis run from the licensed demo, while player
-positions and identities remain fictional rather than traced from footage. Events
-are spaced fifteen seconds apart so the existing single-flight Foundry agent
-pipeline can normally complete before the next submission. Those observations enter FastAPI after
-the vision boundary, bypassing image inference while retaining playback
-generation checks, duplicate suppression, the Match Analyst, Fan Engagement,
-poll policy, persistence, and WebSocket delivery. Video Mode and its rolling
-five-frame vision path are unchanged.
+Synthetic Match Mode adds a deterministic, fictional 240-second SVG replay. Its
+single timeline drives all 22 player positions, fast ball sub-keyframes, the
+clock, and twelve validated `FootballObservation` events. The selected event
+types and ordering are tactically informed by a persisted vision-analysis run
+from the licensed demo, while all player identities, positions, and paths are
+fictional rather than traced from footage. Reference frames used during authoring
+are temporary and are deleted; production continues to store observations only.
+
+Every synthetic event carries a stable ID through the observation adapter, Match
+Analyst, Fan Engagement, WebSocket result, timeline entry, and poll. The client
+accepts a result only for its active event. At normal speed it holds no later than
+ten match-seconds into a phase until the enriched result arrives, displays that
+result over the matching scene for six seconds, and then resumes. An eighteen-
+second timeout releases playback visibly instead of pairing a late result with a
+different scene. This keeps one event in flight and preserves the existing
+single-flight, generation, duplicate, cooldown, and staleness controls.
+
+Synthetic observations enter FastAPI after the vision boundary, bypassing image
+inference while retaining the Match Analyst, Fan Engagement, poll policy,
+persistence, and WebSocket delivery. Video Mode and its rolling five-frame vision
+path are unchanged.
 
 ## Agent contracts
 

@@ -160,5 +160,7 @@ class CosmosStore:
         })
 
     def close(self):
-        self.client.close()
+        close_client = getattr(self.client, "close", None)
+        if close_client:
+            close_client()
 
