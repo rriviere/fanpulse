@@ -68,13 +68,7 @@ FanPulse can understand a match in two different ways:
 1. **Video mode (demonstration only—not part of hackathon judging):** While a video plays, the browser captures a small image once per second. Five images are grouped together and sent securely to the FanPulse backend. Microsoft Foundry examines them and describes what is happening on the pitch.
 2. **Synthetic mode:** No video or images are used. FanPulse reads fictional player movements, ball movements and match events from the synthetic dataset. These are converted into the same structured match description that the video analysis would produce.
 
-From that point onward, both modes work in exactly the same way. The same real Foundry Match Analyst Agent decides whether the moment matters. If it does, the same real Foundry Fan Engagement Agent explains it to the viewer and may create a live poll.
-
-Synthetic mode uses fictional match events as its input, while the Foundry agents interpret each moment and generate fresh insights and polls during playback.
-
-The React application controls what the viewer sees. FastAPI acts as the secure middle layer between the browser, Microsoft Foundry and Cosmos DB. The browser never contacts the AI model directly.
-
-> **Video provides images. Synthetic mode provides fictional events. Both become the same match observation and enter the same real Foundry agent pipeline.**
+Once FanPulse sends the match moment to Foundry, both modes work the same way. The same Match Analyst Agent decides whether the moment matters. If it does, the same Fan Engagement Agent explains it and may create a live poll.
 
 ## How it works
 
