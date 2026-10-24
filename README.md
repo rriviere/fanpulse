@@ -72,9 +72,22 @@ Once FanPulse sends the match moment to Foundry, both modes work the same way. T
 
 ## How it works
 
-FanPulse separates deterministic match state from AI interpretation. The browser owns the animation and match clock; FastAPI validates and orchestrates each event; Foundry decides whether the moment matters and how to explain it; Cosmos DB and WebSockets make the resulting interaction durable and shared.
+The diagram below follows one Synthetic match moment from start to finish. The Match Analyst Agent reviews the event evidence, scores its significance from 0 to 100, and explains why it matters. It must use only the supplied match information and cannot invent new facts.
 
-The sequence below follows one synthetic play from movement on the pitch to a personalised insight and audience vote. It intentionally begins with a structured observation because the judged Synthetic path replaces frame capture and vision. The optional Video path and its frame transfer are documented in the **Synthetic data** section below.
+Routine moments stop there. Significant moments move to the Fan Engagement Agent, which creates a viewer-friendly explanation and may suggest a live poll. Polls require a significance score of at least 60 and must pass the backend's confidence, cooldown and duplicate checks before appearing.
+
+This diagram focuses on Synthetic mode, the experience used for hackathon judging.
+
+### The two Foundry agents
+
+FanPulse uses two persisted Microsoft Foundry agents, each with one clear job:
+
+| Agent | Receives | Responsibility | Structured output |
+| --- | --- | --- | --- |
+| **Match Analyst** | One validated football observation | Decide whether the moment is significant, explain why, and state any uncertainty without inventing match facts | `MatchAssessment` |
+| **Fan Engagement** | Observation, assessment and viewer mode | Turn significant moments into audience-friendly insights and, when appropriate, a balanced poll | `FanEngagementDecision` |
+
+Both agents are powered by the keyless `gpt-5-mini` deployment in Microsoft Foundry. Their prompts are version-controlled in [`ai/agents/`](ai/agents/), and JSON Schema keeps their responses predictable for the application.
 
 ```mermaid
 sequenceDiagram
@@ -115,24 +128,12 @@ sequenceDiagram
     end
 ```
 
-At the event timestamp, the browser posts a validated `FootballObservation` to `/api/analysis/sessions/{session_id}/synthetic`. Synthetic mode deliberately enters the pipeline **after** the computer-vision boundary: no rendered animation frames or tracking coordinates are sent to a model. FastAPI invokes the persisted Match Analyst and Fan Engagement agents, and Foundry runs each agent against the configured `gpt-5-mini` deployment.
+### What appears to the viewer?
 
-There is no additional direct `gpt-5-mini` call in the Synthetic path. The direct multimodal model call belongs to the optional Video path, where FastAPI sends an ordered frame window to the Foundry Responses API to produce the shared observation before invoking the same two agents.
-
-There are no hard-coded agent answers, polls or fallback insights. If Foundry is unavailable, the UI reports the failure instead of fabricating a result.
-
-### Significance and publishing decisions
-
-Significance is not inferred from the animation by the browser. It passes through explicit model and server-side gates:
-
-| Decision | Owner | Effect |
-| --- | --- | --- |
-| Is the source event potentially meaningful? | Validated `FootballObservation` | `is_significant=false` or `confidence=low` forces suppression, regardless of later agent output. |
-| Is the moment meaningful in football terms? | Foundry Match Analyst Agent | Returns a `significant` boolean, a 0–100 score, rationale and uncertainty. A routine result stops the pipeline before Fan Engagement, saving a second model call. |
-| Should an insight be shown? | Foundry Fan Engagement Agent + FastAPI policy | Fan Engagement returns `publish_insight`; FastAPI re-applies the source-evidence and confidence gates before publishing. |
-| Should viewers be asked to vote? | Foundry Fan Engagement Agent + deterministic FastAPI policy | A poll is eligible only for a published insight with significance **60 or higher**, then must also pass the 14-second cooldown and duplicate-key checks. |
-
-The model explains why a moment matters, while deterministic backend policy retains final control over what is published and whether a poll can open.
+- A routine or low-confidence moment is recorded but not shown as an insight.
+- A significant moment can become Live Intelligence after the Fan Engagement Agent explains it.
+- A poll appears only when the score is at least 60 and the backend confirms it is timely and not a duplicate.
+- If Foundry is unavailable, FanPulse reports the problem instead of displaying a made-up answer.
 
 ### The five-stage hackathon pipeline
 
@@ -143,19 +144,6 @@ The model explains why a moment matters, while deterministic backend policy reta
 | **3. Explain** | Pass the observation and assessment to the Fan Engagement agent, which produces concise copy and an optional poll. |
 | **4. Render** | Deliver the result over WebSocket and render it beside the matching action, with evidence and uncertainty visible. |
 | **5. Personalise** | Use the selected Casual or Tactical mode to control the language and depth of the generated explanation. |
-
-## The two-agent team
-
-The deployed Foundry portal assets are generated from version-controlled definitions in [`ai/agents/`](ai/agents/). Prompts live in YAML, responses are constrained by JSON Schema, and Python owns orchestration rather than embedding prompt text.
-
-| Agent | Receives | Responsibility | Structured output |
-| --- | --- | --- | --- |
-| **Match Analyst** | One validated football observation | Decide whether the visible moment is significant, provide a short summary and rationale, and state uncertainty without inventing match facts | `MatchAssessment` |
-| **Fan Engagement** | Observation, assessment and viewer mode | Publish or suppress an insight, adapt its language, and optionally create a neutral poll for sufficiently significant moments | `FanEngagementDecision` |
-
-Both agents use the `foundry-multimodal` model profile, currently mapped to a keyless `gpt-5-mini` Global Standard deployment in Microsoft Foundry. Agent definitions use minimal reasoning effort and strict token and response limits to control latency and cost.
-
-The provisioning process hashes the resolved YAML definition and JSON Schema. It creates a new immutable Foundry agent version only when that configuration has changed.
 
 ## Synthetic data
 
