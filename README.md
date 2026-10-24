@@ -23,34 +23,48 @@ Football is better when fans can do more than watch. Every attack, recovery and 
 
 The hackathon experience brings that vision to life through a continuous 240-second fictional match with all 22 players and the ball in motion. Real Foundry agents interpret its synchronized observations at runtime; the insights and polls are not pre-written answers.
 
-## End-to-end architecture
+## Component architecture
 
 ```mermaid
 flowchart LR
-    subgraph Inputs["Interchangeable input paths"]
-        VIDEO["Video mode<br/>demo only — not judged"]
-        WINDOW["Rolling five-frame window<br/>1 compressed JPEG per second"]
-        VIDEO_API["FastAPI /windows<br/>frame validation"]
-        VISION["Direct Foundry multimodal vision<br/>gpt-5-mini"]
-        SYNTH["Synthetic mode<br/>fictional player, ball and event data"]
-        ADAPTER["Deterministic<br/>observation adapter"]
-        SYNTH_API["FastAPI /synthetic<br/>event validation"]
-
-        VIDEO --> WINDOW --> VIDEO_API --> VISION
-        SYNTH --> ADAPTER --> SYNTH_API
+    subgraph Sources["Match input sources"]
+        VIDEO["Video Playback<br/>demo only — not judged"]
+        SYNTH["Synthetic Match Data<br/>judged experience"]
     end
 
-    VISION --> OBS["Shared validated<br/>FootballObservation"]
-    SYNTH_API --> OBS
-    OBS --> API["Shared FastAPI<br/>agent orchestration"]
-    API --> ANALYST["Foundry Match Analyst<br/>Agent"]
-    ANALYST --> GATE{"Significant<br/>football moment?"}
-    GATE -->|No| SUPPRESS["Persist evidence<br/>and suppress"]
-    GATE -->|Yes| ENGAGE["Foundry Fan Engagement<br/>Agent"]
-    ENGAGE --> POLICY{"Publish insight?<br/>Poll eligible?"}
-    POLICY --> OUTPUT["Live Intelligence<br/>timeline + voting"]
-    SUPPRESS --> STORE["Cosmos DB<br/>activity + votes"]
-    OUTPUT --> STORE
+    subgraph Adapters["Input adapters"]
+        VISION["Video Observation Adapter<br/>FastAPI + Foundry Vision"]
+        SIM["Synthetic Observation Adapter<br/>React + FastAPI"]
+    end
+
+    CONTRACT["Shared FootballObservation<br/>Contract"]
+
+    subgraph Agents["Microsoft Foundry agent pipeline — gpt-5-mini"]
+        ANALYST["Match Analyst Agent"]
+        ENGAGE["Fan Engagement Agent"]
+    end
+
+    subgraph Platform["FanPulse platform services"]
+        API["FastAPI Orchestration<br/>Validation + Publishing Policy"]
+        STORE["Cosmos DB<br/>Analysis Activity + Votes"]
+        WS["WebSocket<br/>Live Updates"]
+    end
+
+    UI["React Fan Experience<br/>Live Intelligence + Timeline + Voting"]
+
+    VIDEO --> VISION
+    SYNTH --> SIM
+    VISION --> CONTRACT
+    SIM --> CONTRACT
+    CONTRACT --> API
+    API --> ANALYST
+    ANALYST -->|assessment| API
+    API -->|significant moments only| ENGAGE
+    ENGAGE -->|insight + optional poll| API
+    API <--> STORE
+    API --> WS
+    WS --> UI
+    UI -->|viewer mode + votes| API
 ```
 
 ### Two ways in. One real AI pipeline.
