@@ -44,7 +44,7 @@ async function syntheticPage(page: Page, deferVotes = false) {
   })
   await page.route('**/media/match.mov', route => route.abort())
   await page.goto('/?debugSynthetic=1')
-  await page.getByRole('button', {name:'Synthetic match',exact:true}).click()
+  await expect(page.getByRole('button', {name:'Synthetic match',exact:true})).toHaveClass('active')
   await expect(page.locator('.synthetic-stage')).toBeVisible()
   await expect(page.locator('.status')).toHaveText('Connected')
   await page.clock.pauseAt(new Date('2026-10-24T00:00:05Z'))

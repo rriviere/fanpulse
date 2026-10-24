@@ -12,14 +12,15 @@ const POLL_VOTING_SECONDS=45
 const VOTED_POLL_DISPLAY_SECONDS=5
 const viewerId=localStorage.getItem('fanpulse-viewer-id') || crypto.randomUUID()
 localStorage.setItem('fanpulse-viewer-id',viewerId)
-const analysisSessionId=sessionStorage.getItem('fanpulse-analysis-session') || crypto.randomUUID()
+// Refreshing starts a new playback session instead of reusing an older generation.
+const analysisSessionId=crypto.randomUUID()
 sessionStorage.setItem('fanpulse-analysis-session',analysisSessionId)
 const debugSynthetic=new URLSearchParams(location.search).has('debugSynthetic')
 
 function App(){
   const video=useRef<HTMLVideoElement>(null)
   const [clock,setClock]=useState(0), [playing,setPlaying]=useState(false), [rate,setRate]=useState(1)
-  const [sourceMode,setSourceMode]=useState<SourceMode>('video')
+  const [sourceMode,setSourceMode]=useState<SourceMode>('synthetic')
   const [mode,setMode]=useState<ViewerMode>('casual'), [timeline,setTimeline]=useState<MatchEvent[]>([])
   const [poll,setPoll]=useState<Poll|null>(null), [counts,setCounts]=useState<Counts>({}), [voted,setVoted]=useState<string|null>(null)
   const [pollClock,setPollClock]=useState(0)
@@ -268,7 +269,7 @@ function App(){
 
   return <main>
     <header><div className="brand"><div className="mark"><Sparkles size={17}/></div><div><strong>FANPULSE</strong><span>Your Voice in the Game</span></div></div><div className="header-actions"><div className="source-switch"><button className={sourceMode==='video'?'active':''} onClick={()=>switchSource('video')}>Video</button><button className={sourceMode==='synthetic'?'active':''} onClick={()=>switchSource('synthetic')}>Synthetic match</button></div><span className="live"><i/> AI ACTIVE</span><div className="mode"><button className={mode==='casual'?'active':''} onClick={()=>setMode('casual')}>Casual</button><button className={mode==='analyst'?'active':''} onClick={()=>setMode('analyst')}>Tactical</button></div></div></header>
-    <section className="scorebar"><div className="team"><b className="green-crest">G</b><span>Green United</span></div><div className="score"><strong>0 <em>—</em> 0</strong><span>{time} · {sourceMode==='synthetic'?'SYNTHETIC EVENT OBSERVATIONS':'VISION-DERIVED OBSERVATIONS'}</span></div><div className="team away"><span>Black FC</span><b className="black-crest">B</b></div></section>
+    <section className="scorebar" aria-label="Match scoreboard"><div className="scoreline"><div className="team"><b className="green-crest">G</b><span>Green United</span></div><div className="score"><strong>0 <em>—</em> 0</strong></div><div className="team away"><b className="black-crest">B</b><span>Black FC</span></div></div><span className="match-meta">{time} · {sourceMode==='synthetic'?'SYNTHETIC EVENT OBSERVATIONS':'VISION-DERIVED OBSERVATIONS'}</span></section>
     <div className="layout">
       <section className="viewer">
         <div className="video-shell">
